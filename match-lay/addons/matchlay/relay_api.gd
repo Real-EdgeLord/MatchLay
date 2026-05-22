@@ -1,4 +1,4 @@
-## RelayMultiplayerAPI – A custom MultiplayerAPI that uses a UDP relay.
+## RelayMultiplayerAPI - Custom MultiplayerAPI using UDP relay.
 @tool
 extends MultiplayerAPIExtension
 class_name RelayMultiplayerAPI
@@ -7,11 +7,9 @@ var _relay_host: String = ""
 var _relay_port: int = 0
 var _room_id: String = ""
 var _unique_id: int = 0
-
 var _udp: PacketPeerUDP = PacketPeerUDP.new()
 var _handshake_sent: bool = false
 var _packet_queue: Array[PackedByteArray] = []
-var _polling_timer: Timer = null
 
 func setup(relay_host: String, relay_port: int, room_id: String, unique_id: int = 0) -> Error:
 	_relay_host = relay_host
@@ -31,41 +29,30 @@ func setup(relay_host: String, relay_port: int, room_id: String, unique_id: int 
 		return err
 	
 	_handshake_sent = true
-	
-	_polling_timer = Timer.new()
-	_polling_timer.timeout.connect(_poll)
-	_polling_timer.start(0.01)
-	Engine.get_main_loop().root.add_child(_polling_timer)
-	
-	# Do NOT set multiplayer.multiplayer_api here – let the game script do it.
 	return OK
 
-# Fixed: now returns Error, not void
-func _poll() -> Error:
+# Must be called every frame from your game script
+func poll() -> Error:
 	while _udp.get_available_packet_count() > 0:
 		var packet = _udp.get_packet()
 		_packet_queue.append(packet)
 	
-	# Process queued packets (simplified – you'll need proper decoding)
 	while _packet_queue.size() > 0:
 		var pkt = _packet_queue.pop_front()
-		print("Received packet: ", pkt.hex_encode())
-		# In production: decode and call rpc_id on the appropriate object
+		# Decode and route RPC calls here
+		# For now, just print
+		print("UDP packet received: ", pkt.hex_encode())
 	return OK
 
-func _send_packet(data: PackedByteArray, to_peer: int = 0) -> Error:
-	if not _handshake_sent:
-		return ERR_UNCONFIGURED
-	return _udp.put_packet(data)
-
 func _rpc(peer_id: int, object: Object, method: StringName, args: Array) -> Error:
+	# Serialize and send via UDP
 	var packet = method.to_utf8_buffer()
 	for arg in args:
 		packet += var_to_bytes(arg)
-	return _send_packet(packet, peer_id)
+	return _udp.put_packet(packet)
 
 func _get_peer_ids() -> PackedInt32Array:
-	return PackedInt32Array()  # You'll need to implement peer tracking
+	return PackedInt32Array()
 
 func _get_peers() -> int:
 	return 0
@@ -74,6 +61,4 @@ func _get_unique_id() -> int:
 	return _unique_id
 
 func _cleanup():
-	if _polling_timer:
-		_polling_timer.queue_free()
 	_udp.close()
