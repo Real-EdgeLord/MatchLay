@@ -1,5 +1,5 @@
-extends MultiplayerPeer
-
+extends MultiplayerPeer 
+#class_name RelayPeer
 
 var _relay_host: String = ""
 var _relay_port: int = 0
@@ -24,7 +24,6 @@ func connect_to_relay(host: String, port: int, room_id: String, unique_id: int =
 		_connection_status = MultiplayerPeer.CONNECTION_DISCONNECTED
 		return err
 	
-	# Send handshake (room_id + null byte)
 	var handshake = _room_id.to_utf8_buffer() + PackedByteArray([0])
 	err = _udp.put_packet(handshake)
 	if err == OK:
@@ -34,18 +33,18 @@ func connect_to_relay(host: String, port: int, room_id: String, unique_id: int =
 		_connection_status = MultiplayerPeer.CONNECTION_DISCONNECTED
 	return err
 
-func _poll():
-	if _connection_status != MultiplayerPeer.CONNECTION_CONNECTED:
-		return
+# Called frequently by the engine to check for incoming packets
+func _get_available_packet_count() -> int:
+	# Read all pending UDP packets and store them in the queue
 	while _udp.get_available_packet_count() > 0:
 		var packet = _udp.get_packet()
 		_packet_queue.append(packet)
+	return _packet_queue.size()
 
 func _get_packet() -> PackedByteArray:
-	return _packet_queue.pop_front() if _packet_queue.size() > 0 else PackedByteArray()
-
-func _get_available_packet_count() -> int:
-	return _packet_queue.size()
+	if _packet_queue.is_empty():
+		return PackedByteArray()
+	return _packet_queue.pop_front()
 
 func _put_packet(p_buffer: PackedByteArray) -> Error:
 	if _connection_status != MultiplayerPeer.CONNECTION_CONNECTED:

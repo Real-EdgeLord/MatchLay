@@ -8,7 +8,8 @@ services:
       - "8000:8000"      # HTTP API for matchmaking
       - "5555:5555/udp"  # Single UDP relay port
     environment:
-      - PUBLIC_ADDR=YOUR_PUBLIC_IP       # <-- SET YOUR SERVER'S IP/DOMAIN
-      - SECRET_KEY=YOUR_SECRET_KEY       # <-- SET A STRONG UNIQUE SECRET
-      - RELAY_UDP_PORT=5555
-      - MATCH_TIMEOUT_SECONDS=60
+     - SECRET_KEY=your-very-secret-key
+     - PUBLIC_ADDR=your.server.ip.address
+     - NORAY_UDP_RELAY_PORTS=5555,5556-5560   # Example: one fixed port + a range
+     - MATCH_TIMEOUT_SECONDS=60
+     - HTTP_PORT=8000

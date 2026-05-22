@@ -1,7 +1,7 @@
 extends Node
 
 const RelayPeer = preload("res://addons/matchlay/relay_peer.gd")
-#const MatchLayAPI = preload("res://addons/matchlay/matchlay_api.gd")
+const MatchLayAPI = preload("res://addons/matchlay/matchlay_api.gd")
 
 var api: MatchLayAPI
 var relay_peer: RelayPeer
