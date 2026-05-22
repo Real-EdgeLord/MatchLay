@@ -20,7 +20,7 @@ func _ready():
 
 func _on_room_hosted(room_id: String, relay_host: String, relay_port: int):
 	print("Room hosted: ", room_id, " at ", relay_host, ":", relay_port)
-	relay_peer = relay_peer.new()
+	relay_peer = RelayPeer.new()
 	var err = relay_peer.connect_to_relay(relay_host, relay_port, room_id)
 	if err == OK:
 		multiplayer.multiplayer_peer = relay_peer

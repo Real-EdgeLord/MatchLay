@@ -15,6 +15,7 @@ func init(url: String, key: String) -> void:
 	# Use call_deferred to avoid "busy parent" error during _ready
 	Engine.get_main_loop().root.call_deferred("add_child", http_request)
 	http_request.timeout = 5
+	http_request.request_completed.connect(_on_request_completed)
 
 func host_game(public_data: Dictionary, private_data: Dictionary = {}) -> void:
 	if not http_request or not http_request.is_inside_tree():
