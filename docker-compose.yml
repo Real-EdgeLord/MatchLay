@@ -1,0 +1,13 @@
+services:
+  matchmaker:
+    build: .
+    container_name: udp-matchmaker
+    restart: unless-stopped
+    ports:
+      - "8000:8000"          # HTTP API for matchmaking
+      - "5555:5555/udp"      # Single UDP relay port
+    environment:
+      - PUBLIC_ADDR=your.server.ip.address   # <-- CHANGE THIS
+      - SECRET_KEY=my-very-secret-hex-key    # <-- CHANGE THIS
+      - RELAY_UDP_PORT=5555
+      - MATCH_TIMEOUT_SECONDS=60
