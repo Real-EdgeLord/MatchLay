@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>MatchLay Relay Dashboard</title>
+    <meta charset="utf-8">
+    <style>
+        body { font-family: monospace; margin: 2em; background: #111; color: #eee; }
+        table { border-collapse: collapse; width: 100%; margin-top: 1em; }
+        th, td { border: 1px solid #444; padding: 8px; text-align: left; }
+        th { background: #222; }
+        .refresh { margin-bottom: 1em; }
+        button { background: #2a2a2a; color: white; border: none; padding: 5px 10px; cursor: pointer; }
+        button:hover { background: #3a3a3a; }
+        .timestamp { color: #aaa; margin-bottom: 1em; }
+    </style>
+</head>
+<body>
+    <h1>MatchLay Relay – Live Dashboard</h1>
+    <div class="refresh">
+        <button onclick="fetchRooms()">Refresh</button> <span>Auto‑refresh every 5 seconds</span>
+    </div>
+    <div class="timestamp" id="timestamp"></div>
+    <table id="roomsTable">
+        <thead>
+            <tr><th>Room ID</th><th>Public Data</th><th>Players</th><th>Created (s ago)</th></tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+    <script>
+        async function fetchRooms() {
+            try {
+                const response = await fetch('/rooms');
+                const data = await response.json();
+                const tbody = document.querySelector('#roomsTable tbody');
+                tbody.innerHTML = '';
+                for (const room of data.rooms) {
+                    const row = tbody.insertRow();
+                    row.insertCell(0).textContent = room.room_id;
+                    row.insertCell(1).textContent = JSON.stringify(room.public_data);
+                    row.insertCell(2).textContent = room.player_count;
+                    row.insertCell(3).textContent = room.created_seconds_ago;
+                }
+                document.getElementById('timestamp').textContent = 'Last update: ' + new Date().toLocaleTimeString();
+            } catch (err) {
+                console.error('Failed to fetch rooms:', err);
+            }
+        }
+        fetchRooms();
+        setInterval(fetchRooms, 5000);
+    </script>
+</body>
+</html>
