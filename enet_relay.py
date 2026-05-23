@@ -6,22 +6,22 @@ from typing import Dict, Tuple
 logger = logging.getLogger("matchmaker.enet")
 
 class ENetRelay:
+    # Add a background thread in __init__ to monitor empty rooms
     def __init__(self):
-        self.rooms: Dict[int, Tuple[enet.Host, Dict[int, enet.Peer]]] = {}
-        self._peer_counts: Dict[int, int] = {}
-        self._running = True
-        self._loop_threads: Dict[int, threading.Thread] = {}
-        self._lock = threading.Lock()
+        # ... existing code ...
+        self._empty_room_cleanup_interval = 30  # seconds
+        self._start_empty_room_cleaner()
 
-    def create_room(self, port: int):
-        if port in self.rooms:
-            logger.warning(f"ENet host for port {port} already exists.")
-            return
-        host = enet.Host(enet.Address(b"0.0.0.0", port), 10, 0, 0, 0)
-        with self._lock:
-            self.rooms[port] = (host, {})
-            self._peer_counts[port] = 0
-        logger.info(f"ENet relay started for room on port {port}")
+    def _start_empty_room_cleaner(self):
+        def cleaner():
+            while self._running:
+                time.sleep(self._empty_room_cleanup_interval)
+                with self._lock:
+                    for port, count in list(self._peer_counts.items()):
+                        if count == 0 and port in self.rooms:
+                            logger.info(f"Room on port {port} has no peers, cleaning up")
+                            self.remove_room(port)
+        threading.Thread(target=cleaner, daemon=True).start()
 
         def _service_loop():
             while self._running and port in self.rooms:

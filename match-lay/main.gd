@@ -20,21 +20,25 @@ func _ready():
 	
 
 
+
 func _on_room_hosted(room_id: String, relay_host: String, relay_port: int):
 	current_room_id = room_id
 	print("Room hosted: ", room_id, " at ", relay_host, ":", relay_port)
-	
-	# Send raw UDP handshake to register host with relay
-	var udp = PacketPeerUDP.new()
-	udp.connect_to_host(relay_host, relay_port)
-	var handshake = room_id.to_utf8_buffer() + PackedByteArray([0])
-	udp.put_packet(handshake)
-	udp.close()
-	print("Host registration handshake sent")
-	
-	# Now create the ENet server for actual game traffic
+
+	# Create a temporary ENet client to register the host with the relay
+	var temp_peer = ENetMultiplayerPeer.new()
+	var err = temp_peer.create_client(relay_host, relay_port)
+	if err == OK:
+		# Wait a moment for the connection to be established, then disconnect
+		await get_tree().create_timer(0.5).timeout
+		temp_peer.close()
+		temp_peer = null
+	else:
+		print("Failed to register host with relay: ", err)
+
+	# Now create the actual server peer
 	peer = ENetMultiplayerPeer.new()
-	var err = peer.create_server(relay_port)
+	err = peer.create_server(relay_port)
 	if err == OK:
 		multiplayer.multiplayer_peer = peer
 		print("ENet server created on port ", relay_port)
@@ -132,12 +136,11 @@ func _on_rooms_recevied(rooms: Array):
 func _on_firerpc_button_down() -> void:
 	var mesage : String = "message from " + str(multiplayer.get_unique_id())
 	print("going to send")
-	print(mesage)
 	fire_rpc.rpc(mesage)
 	pass # Replace with function body.
 
 
-@rpc("any_peer")
+@rpc("any_peer","reliable")
 func fire_rpc(test_from : String) -> void :
 	print(test_from)
 	print(multiplayer.get_unique_id())
