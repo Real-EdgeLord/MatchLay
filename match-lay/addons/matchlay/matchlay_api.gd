@@ -133,11 +133,13 @@ func close_room() -> void:
 	if not _is_host or _host_token.is_empty():
 		error_occurred.emit(403, "Not hosting a room")
 		return
-	
+	if not http_request or not http_request.is_inside_tree():
+		error_occurred.emit(500, "HTTPRequest not ready for close_room")
+		return
 	var headers = ["X-API-Key: " + api_key]
 	var url = server_url + "/room/%s?host_token=%s" % [current_room_id, _host_token]
 	var req = HTTPRequest.new()
-	_safe_add_child(req) # <-- THIS WAS THE MISSING LINE!
+	_safe_add_child(req)
 	req.request_completed.connect(_on_close_completed.bind(req))
 	req.request(url, headers, HTTPClient.METHOD_DELETE)
 

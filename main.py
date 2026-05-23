@@ -81,24 +81,20 @@ async def root():
     <body>Redirecting to <a href="/dashboard/dashboard.html">dashboard</a>...</body></html>
     """
 
-# ---------- API endpoints ----------
 @app.post("/host")
 async def host_game(req: HostRequest, auth=Depends(verify_auth)):
     room_id = str(uuid.uuid4())[:8]
-    # Find a free port
+    # find a free port from your range (e.g., 5555-5560)
     used_ports = set(room_port.values())
     relay_port = None
-    for port in range(PORT_START, PORT_END + 1):
+    for port in range(5555, 5561):
         if port not in used_ports:
             relay_port = port
             break
-    if relay_port is None:
-        raise HTTPException(status_code=503, detail="No free UDP ports")
-
+    if not relay_port:
+        raise HTTPException(503, "No free UDP ports")
     # Start the ENet relay for this room
-    enet_relay.create_room(relay_port)
-
-
+    enet_relay.create_room(relay_port)   # <<< only this, no register_host
     host_token = str(uuid.uuid4())[:16]
     rooms[room_id] = {
         "room_id": room_id,

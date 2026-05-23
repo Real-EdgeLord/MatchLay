@@ -41,9 +41,8 @@ func _connect_to_relay(host: String, port: int):
 		print("Failed to create client: ", err)
 		return
 	
-	# Poll for connection status (max 2 seconds)
 	var start = Time.get_ticks_msec()
-	while Time.get_ticks_msec() - start < 2000:
+	while Time.get_ticks_msec() - start < 3000:
 		if peer.get_connection_status() == MultiplayerPeer.CONNECTION_CONNECTED:
 			multiplayer.multiplayer_peer = peer
 			print("Connected to relay!")
@@ -53,8 +52,10 @@ func _connect_to_relay(host: String, port: int):
 			return
 		await get_tree().process_frame
 	
-	print("Connection timeout - relay not responding")
-	_cleanup_room()
+	print("Connection timeout – relay unreachable")
+	# Do not call _cleanup_room here; let user retry
+
+
 @rpc("any_peer", "reliable")
 func _set_host(host_id: int):
 	# This RPC will be called on all clients. The host's ID is recorded.
