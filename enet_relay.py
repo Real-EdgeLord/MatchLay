@@ -8,10 +8,9 @@ logger = logging.getLogger("matchmaker.enet")
 
 class ENetRelay:
     def __init__(self):
-        self.rooms: Dict[int, Tuple[enet.Host, Dict[int, enet.Peer]]] = {}
+        self.rooms: Dict[int, Tuple[enet.Host, Dict[int, enet.Peer], threading.Thread]] = {}
         self._peer_counts: Dict[int, int] = {}
         self._running = True
-        self._loop_threads: Dict[int, threading.Thread] = {}
         self._lock = threading.Lock()
         self._start_empty_room_cleaner()
         logger.info("ENetRelay initialized")
@@ -21,9 +20,9 @@ class ENetRelay:
             while self._running:
                 time.sleep(30)
                 with self._lock:
-                    for port, count in list(self._peer_counts.items()):
-                        if count == 0 and port in self.rooms:
-                            logger.info(f"Cleaning up empty room on port {port}")
+                    for port in list(self.rooms.keys()):
+                        if self._peer_counts.get(port, 0) == 0:
+                            logger.info(f"Empty room on port {port} – cleaning up")
                             self.remove_room(port)
         threading.Thread(target=cleaner, daemon=True).start()
 
@@ -33,9 +32,8 @@ class ENetRelay:
             return
         host = enet.Host(enet.Address(b"0.0.0.0", port), 10, 0, 0, 0)
         with self._lock:
-            self.rooms[port] = (host, {})
+            self.rooms[port] = (host, {}, None)  # placeholder for thread
             self._peer_counts[port] = 0
-        logger.info(f"Created ENet host for room on port {port}")
 
         def _service_loop():
             logger.info(f"Starting service loop for port {port}")
@@ -45,64 +43,65 @@ class ENetRelay:
                     continue
                 elif event.type == enet.EVENT_TYPE_CONNECT:
                     peer = event.peer
-                    peer_addr = peer.address.host, peer.address.port
-                    logger.info(f"ENet CONNECT event: peer {peer_addr} connected to port {port}")
                     with self._lock:
                         self.rooms[port][1][peer.address.port] = peer
                         self._peer_counts[port] = len(self.rooms[port][1])
-                    logger.info(f"Room {port} now has {self._peer_counts[port]} peer(s)")
+                    logger.info(f"Peer {peer.address.port} connected to room {port} (count={self._peer_counts[port]})")
                 elif event.type == enet.EVENT_TYPE_RECEIVE:
                     sender = event.peer.address.port
-                    packet_data = event.packet.data
-                    logger.info(f"ENet RECEIVE event: from peer {sender} on port {port}, data length {len(packet_data)}")
                     with self._lock:
                         for other_port, peer in self.rooms[port][1].items():
                             if other_port != sender:
-                                logger.info(f"Forwarding packet from {sender} to peer {other_port}")
                                 peer.send(event.channel_id, event.packet)
                 elif event.type == enet.EVENT_TYPE_DISCONNECT:
                     peer = event.peer
-                    peer_addr = peer.address.host, peer.address.port
-                    logger.info(f"ENet DISCONNECT event: peer {peer_addr} disconnected from port {port}")
                     with self._lock:
                         if peer.address.port in self.rooms[port][1]:
                             del self.rooms[port][1][peer.address.port]
                             self._peer_counts[port] = len(self.rooms[port][1])
-                    logger.info(f"Room {port} now has {self._peer_counts[port]} peer(s)")
+                    logger.info(f"Peer {peer.address.port} disconnected from room {port} (count={self._peer_counts[port]})")
             logger.info(f"Service loop for port {port} exiting")
-            if port in self.rooms:
-                host.flush()
-                with self._lock:
+            # Clean up host after loop ends
+            with self._lock:
+                if port in self.rooms:
+                    host.flush()
                     del self.rooms[port]
-                    del self._peer_counts[port]
+                    if port in self._peer_counts:
+                        del self._peer_counts[port]
 
         thread = threading.Thread(target=_service_loop, daemon=True)
         thread.start()
         with self._lock:
-            self._loop_threads[port] = thread
+            # Replace placeholder with actual thread
+            host, peers, _ = self.rooms[port]
+            self.rooms[port] = (host, peers, thread)
+        logger.info(f"Created room on port {port}")
 
     def get_peer_count(self, port: int) -> int:
         with self._lock:
             return self._peer_counts.get(port, 0)
 
     def remove_room(self, port: int):
-        if port not in self.rooms:
-            return
-        logger.info(f"Removing room on port {port}")
         with self._lock:
-            if port in self.rooms:
-                self.rooms[port][0].flush()
-                del self.rooms[port]
+            if port not in self.rooms:
+                return
+            logger.info(f"Removing room on port {port}")
+            # The service loop will exit because port is no longer in self.rooms
+            # But we need to trigger the loop to exit quickly by closing the host's socket
+            host, _, thread = self.rooms[port]
+            # Force host to stop listening (internal, but safe)
+            host._socket.close()  # this will cause service() to exit
+            # Wait a moment for the thread to finish
+            thread.join(timeout=1)
+            # Clean up any remaining references
+            del self.rooms[port]
             if port in self._peer_counts:
                 del self._peer_counts[port]
-            if port in self._loop_threads:
-                # thread will exit on its own because self._running may be False or port gone
-                pass
 
     def shutdown(self):
         logger.info("Shutting down ENetRelay")
         self._running = False
-        time.sleep(0.5)
         with self._lock:
             for port in list(self.rooms.keys()):
                 self.remove_room(port)
+        time.sleep(0.5)
