@@ -3,6 +3,8 @@ import uuid
 import time
 import logging
 import os
+from collections import defaultdict
+from typing import Dict, Tuple, Set
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Depends, Header
@@ -12,28 +14,30 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import uvicorn
 
-from enet_relay import ENetRelay  # Import our new relay
+from enet_relay import ENetRelay
 
 # ---------- Configuration ----------
 SECRET_KEY = os.getenv("SECRET_KEY", "change-me-in-production")
 PUBLIC_ADDR = os.getenv("PUBLIC_ADDR", "localhost")
 MATCH_TIMEOUT_SECONDS = int(os.getenv("MATCH_TIMEOUT_SECONDS", "60"))
 HTTP_PORT = int(os.getenv("HTTP_PORT", "8000"))
-RELAY_HOST = "0.0.0.0"
+PORT_START = int(os.getenv("PORT_START", "5555"))
+PORT_END = int(os.getenv("PORT_END", "5560"))
 
-# ---------- Global Relay Instance ----------
+# ---------- Global Relay ----------
 enet_relay = ENetRelay()
 
-# ---------- State ----------
-rooms: Dict[str, dict] = {}          # room_id -> room data
-room_port: Dict[str, int] = {}       # room_id -> assigned UDP port
-room_clients: Dict[str, set] = defaultdict(set)   # room_id -> set of peer IDs (for dashboard)
-host_token_map: Dict[str, str] = {}  # room_id -> host_token
+# ---------- Application state ----------
+rooms: Dict[str, dict] = {}
+room_port: Dict[str, int] = {}
+room_clients: Dict[str, Set[Tuple[str, int]]] = defaultdict(set)
+client_to_room: Dict[Tuple[str, int], str] = {}
+host_token_map: Dict[str, str] = {}
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("matchmaker")
 
-# ---------- Models (same as before) ----------
+# ---------- Pydantic models ----------
 class HostRequest(BaseModel):
     public_data: dict
     private_data: dict | None = None
@@ -47,10 +51,8 @@ class HeartbeatRequest(BaseModel):
 # ---------- FastAPI with lifespan ----------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: nothing needed, ENetRelay starts on demand
-    logger.info("Matchmaker started")
+    logger.info("Matchmaker starting...")
     yield
-    # Shutdown: close all ENet rooms
     enet_relay.shutdown()
     logger.info("Matchmaker shut down")
 
@@ -83,9 +85,13 @@ async def root():
 @app.post("/host")
 async def host_game(req: HostRequest, auth=Depends(verify_auth)):
     room_id = str(uuid.uuid4())[:8]
-    # Assign a free UDP port (you can reuse your port range logic)
+    # Find a free port
     used_ports = set(room_port.values())
-    relay_port = next((p for p in range(5555, 5561) if p not in used_ports), None)
+    relay_port = None
+    for port in range(PORT_START, PORT_END + 1):
+        if port not in used_ports:
+            relay_port = port
+            break
     if relay_port is None:
         raise HTTPException(status_code=503, detail="No free UDP ports")
 
@@ -120,7 +126,7 @@ async def list_rooms():
             result.append({
                 "room_id": rid,
                 "public_data": room["public_data"],
-                "player_count": len(room_clients.get(rid, [])),  # You'd need to track this from ENet
+                "player_count": len(room_clients.get(rid, [])),
                 "created_seconds_ago": int(now - room["created_at"])
             })
     return {"rooms": result}
@@ -131,6 +137,7 @@ async def join_room(room_id: str, req: JoinRequest, auth=Depends(verify_auth)):
         raise HTTPException(status_code=404, detail="Room not found")
     room = rooms[room_id]
     if time.time() - room["last_heartbeat"] >= MATCH_TIMEOUT_SECONDS:
+        # Room expired
         del rooms[room_id]
         raise HTTPException(status_code=410, detail="Room expired")
     if room["private_data"] and req.private_data != room["private_data"]:
@@ -154,11 +161,19 @@ async def delete_room(room_id: str, host_token: str, auth=Depends(verify_auth)):
         raise HTTPException(status_code=404, detail="Room not found")
     if host_token_map.get(room_id) != host_token:
         raise HTTPException(status_code=403, detail="Invalid host token")
-    # Stop the ENet relay
-    enet_relay.remove_room(rooms[room_id]["relay_port"])
+    # Stop the ENet relay for this room
+    relay_port = rooms[room_id]["relay_port"]
+    enet_relay.remove_room(relay_port)
+    # Clean up internal state
     del room_port[room_id]
     del rooms[room_id]
     del host_token_map[room_id]
+    # Remove client address mappings
+    for addr, rid in list(client_to_room.items()):
+        if rid == room_id:
+            del client_to_room[addr]
+    if room_id in room_clients:
+        del room_clients[room_id]
     logger.info(f"Room {room_id} deleted")
     return {"status": "deleted"}
 
