@@ -6,7 +6,7 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000"      # HTTP API for matchmaking
-      - "5555:5555/udp"  # Single UDP relay port
+      - "5555-5560:5555-5560/udp"   # Single UDP relay port
     environment:
      - SECRET_KEY=your-very-secret-key
      - PUBLIC_ADDR=your.server.ip.address

@@ -10,3 +10,45 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_ig7tw")
+
+[node name="Panel" type="Panel" parent="." unique_id=919869482]
+layout_mode = 0
+offset_left = 419.0
+offset_top = 185.0
+offset_right = 693.0
+offset_bottom = 405.0
+
+[node name="VBoxContainer" type="VBoxContainer" parent="Panel" unique_id=66350877]
+layout_mode = 0
+offset_right = 40.0
+offset_bottom = 40.0
+
+[node name="HBoxContainer" type="HBoxContainer" parent="Panel/VBoxContainer" unique_id=1691236964]
+layout_mode = 2
+
+[node name="Host" type="Button" parent="Panel/VBoxContainer/HBoxContainer" unique_id=1517452669]
+layout_mode = 2
+text = "Host"
+
+[node name="Close" type="Button" parent="Panel/VBoxContainer/HBoxContainer" unique_id=1710076762]
+layout_mode = 2
+text = "Close"
+
+[node name="GetRooms" type="Button" parent="Panel/VBoxContainer/HBoxContainer" unique_id=1893834953]
+layout_mode = 2
+text = "GetRooms
+"
+
+[node name="Join" type="Button" parent="Panel/VBoxContainer/HBoxContainer" unique_id=149680098]
+layout_mode = 2
+text = "Join First"
+
+[node name="firerpc" type="Button" parent="Panel/VBoxContainer/HBoxContainer" unique_id=1862458106]
+layout_mode = 2
+text = "FireRPC"
+
+[connection signal="button_down" from="Panel/VBoxContainer/HBoxContainer/Host" to="." method="_on_host_button_down"]
+[connection signal="button_down" from="Panel/VBoxContainer/HBoxContainer/Close" to="." method="_on_close_button_down"]
+[connection signal="button_down" from="Panel/VBoxContainer/HBoxContainer/GetRooms" to="." method="_on_get_rooms_button_down"]
+[connection signal="button_down" from="Panel/VBoxContainer/HBoxContainer/Join" to="." method="_on_join_button_down"]
+[connection signal="button_down" from="Panel/VBoxContainer/HBoxContainer/firerpc" to="." method="_on_firerpc_button_down"]

@@ -3,17 +3,20 @@ class_name MatchLayAPI
 extends RefCounted
 
 signal rooms_received(rooms: Array)
-signal room_hosted(room_id: String, relay_host: String, relay_port: int, host_token: String)
+signal room_hosted(room_id: String, relay_host: String, relay_port: int)
 signal room_joined(room_id: String, relay_host: String, relay_port: int)
 signal error_occurred(code: int, message: String)
 signal room_expired(room_id: String)
 
+var _is_host: bool = false
 var server_url: String = ""
 var api_key: String = ""
 var http_request: HTTPRequest = null
 var heartbeat_request: HTTPRequest = null  # dedicated for heartbeats
 var heartbeat_timer: Timer = null
 var current_room_id: String = ""
+
+var _host_token: String = ""  # stored only when hosting
 
 func init(url: String, key: String) -> void:
 	server_url = url
@@ -109,13 +112,49 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 	if json.has("rooms"):
 		rooms_received.emit(json.rooms)
 	elif json.has("room_id") and json.has("relay_host") and json.has("relay_port"):
-		room_hosted.emit(json.room_id, json.relay_host, json.relay_port, json.get("host_token", ""))
-		room_joined.emit(json.room_id, json.relay_host, json.relay_port)
-		start_heartbeat(json.room_id)
+		var room_id = json.room_id
+		var relay_host = json.relay_host
+		var relay_port = json.relay_port
+		if json.has("host_token"):   # This is a host response
+			_is_host = true
+			_host_token = json.host_token
+			room_hosted.emit(room_id, relay_host, relay_port)
+		else:                         # This is a join response
+			_is_host = false
+			_host_token = ""
+			room_joined.emit(room_id, relay_host, relay_port)
+		start_heartbeat(room_id)
+	
 
 
-
-func close_room(room_id: String, host_token: String) -> void:
+# Add close_room method
+func close_room() -> void:
+	if not _is_host or _host_token.is_empty():
+		error_occurred.emit(403, "Not hosting a room")
+		return
 	var headers = ["X-API-Key: " + api_key]
-	var url = server_url + "/room/%s?host_token=%s" % [room_id, host_token]
-	http_request.request(url, headers, HTTPClient.METHOD_DELETE)
+	var url = server_url + "/room/%s?host_token=%s" % [current_room_id, _host_token]
+	var req = HTTPRequest.new()
+	_safe_add_child(req)
+	req.request_completed.connect(_on_close_completed.bind(req))
+	req.request(url, headers, HTTPClient.METHOD_DELETE)
+
+
+func leave_room() -> void:
+	if _is_host:
+		close_room()
+		return
+	# For joiners: just stop heartbeat and clean up locally
+	stop_heartbeat()
+	current_room_id = ""
+	_is_host = false
+	_host_token = ""
+
+func _on_close_completed(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray, req: HTTPRequest):
+	req.queue_free()
+	if response_code == 200:
+		stop_heartbeat()
+		current_room_id = ""
+		_host_token = ""
+	else:
+		error_occurred.emit(response_code, "Failed to close room")
