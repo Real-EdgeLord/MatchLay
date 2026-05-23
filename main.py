@@ -123,10 +123,11 @@ async def list_rooms():
     result = []
     for rid, room in rooms.items():
         if now - room["last_heartbeat"] < MATCH_TIMEOUT_SECONDS:
+            player_count = enet_relay.get_peer_count(room["relay_port"])
             result.append({
                 "room_id": rid,
                 "public_data": room["public_data"],
-                "player_count": len(room_clients.get(rid, [])),
+                "player_count": player_count,
                 "created_seconds_ago": int(now - room["created_at"])
             })
     return {"rooms": result}

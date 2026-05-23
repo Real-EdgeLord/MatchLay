@@ -141,4 +141,3 @@ func _on_firerpc_button_down() -> void:
 func fire_rpc(test_from : String) -> void :
 	print(test_from)
 	print(multiplayer.get_unique_id())
-	
