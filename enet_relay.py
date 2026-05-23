@@ -1,27 +1,43 @@
+# enet_relay.py
 import enet
 import logging
 import threading
+import time
 from typing import Dict, Tuple
 
 logger = logging.getLogger("matchmaker.enet")
 
 class ENetRelay:
-    # Add a background thread in __init__ to monitor empty rooms
     def __init__(self):
-        # ... existing code ...
-        self._empty_room_cleanup_interval = 30  # seconds
+        self.rooms: Dict[int, Tuple[enet.Host, Dict[int, enet.Peer]]] = {}
+        self._peer_counts: Dict[int, int] = {}
+        self._running = True
+        self._loop_threads: Dict[int, threading.Thread] = {}
+        self._lock = threading.Lock()
+        # Start the empty‑room cleaner thread
         self._start_empty_room_cleaner()
 
     def _start_empty_room_cleaner(self):
         def cleaner():
             while self._running:
-                time.sleep(self._empty_room_cleanup_interval)
+                time.sleep(30)  # Check every 30 seconds
                 with self._lock:
-                    for port, count in list(self._peer_counts.items()):
-                        if count == 0 and port in self.rooms:
+                    for port in list(self.rooms.keys()):
+                        if self._peer_counts.get(port, 0) == 0:
                             logger.info(f"Room on port {port} has no peers, cleaning up")
                             self.remove_room(port)
-        threading.Thread(target=cleaner, daemon=True).start()
+        thread = threading.Thread(target=cleaner, daemon=True)
+        thread.start()
+
+    def create_room(self, port: int):
+        if port in self.rooms:
+            logger.warning(f"ENet host for port {port} already exists.")
+            return
+        host = enet.Host(enet.Address(b"0.0.0.0", port), 10, 0, 0, 0)
+        with self._lock:
+            self.rooms[port] = (host, {})
+            self._peer_counts[port] = 0
+        logger.info(f"ENet relay started for room on port {port}")
 
         def _service_loop():
             while self._running and port in self.rooms:
@@ -53,7 +69,8 @@ class ENetRelay:
 
         thread = threading.Thread(target=_service_loop, daemon=True)
         thread.start()
-        self._loop_threads[port] = thread
+        with self._lock:
+            self._loop_threads[port] = thread
 
     def get_peer_count(self, port: int) -> int:
         with self._lock:
@@ -63,16 +80,20 @@ class ENetRelay:
         if port not in self.rooms:
             return
         logger.info(f"Stopping ENet relay for room on port {port}")
-        self.rooms[port][0].flush()
         with self._lock:
             if port in self.rooms:
+                self.rooms[port][0].flush()
                 del self.rooms[port]
             if port in self._peer_counts:
                 del self._peer_counts[port]
-        if port in self._loop_threads:
-            self._loop_threads[port].join(timeout=1)
+            if port in self._loop_threads:
+                # Thread will exit because self._running becomes False
+                pass
 
     def shutdown(self):
         self._running = False
-        for port in list(self.rooms.keys()):
-            self.remove_room(port)
+        # Wait a bit for threads to finish
+        time.sleep(0.5)
+        with self._lock:
+            for port in list(self.rooms.keys()):
+                self.remove_room(port)
