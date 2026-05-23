@@ -41,9 +41,9 @@ func start_heartbeat(room_id: String) -> void:
 	heartbeat_timer.name = "HeartBeat"
 	heartbeat_timer.wait_time = 30.0
 	heartbeat_timer.one_shot = false
+	heartbeat_timer.autostart = true
 	heartbeat_timer.timeout.connect(_send_heartbeat)
 	_safe_add_child(heartbeat_timer)
-	heartbeat_timer.start()
 
 func stop_heartbeat() -> void:
 	if heartbeat_timer and heartbeat_timer.is_inside_tree():
