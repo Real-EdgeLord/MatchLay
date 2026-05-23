@@ -36,25 +36,25 @@ func _on_room_joined(room_id: String, relay_host: String, relay_port: int):
 
 func _connect_to_relay(host: String, port: int):
 	peer = ENetMultiplayerPeer.new()
-	peer.connected_to_server.connect(_on_connected_to_server)
-	peer.connection_failed.connect(_on_connection_failed)
 	var err = peer.create_client(host, port)
 	if err != OK:
 		print("Failed to create client: ", err)
-
-func _on_connected_to_server():
-	print("Connected to relay!")
-	multiplayer.multiplayer_peer = peer
-	if is_host:
-		# Send an RPC to identify as host after a short delay
-		await get_tree().create_timer(0.2).timeout
-		rpc_id(1, "_set_host", multiplayer.get_unique_id())
-
-func _on_connection_failed():
-	print("Connection to relay failed")
+		return
+	
+	# Poll for connection status (max 2 seconds)
+	var start = Time.get_ticks_msec()
+	while Time.get_ticks_msec() - start < 2000:
+		if peer.get_connection_status() == MultiplayerPeer.CONNECTION_CONNECTED:
+			multiplayer.multiplayer_peer = peer
+			print("Connected to relay!")
+			if is_host:
+				await get_tree().create_timer(0.2).timeout
+				rpc_id(1, "_set_host", multiplayer.get_unique_id())
+			return
+		await get_tree().process_frame
+	
+	print("Connection timeout - relay not responding")
 	_cleanup_room()
-
-
 @rpc("any_peer", "reliable")
 func _set_host(host_id: int):
 	# This RPC will be called on all clients. The host's ID is recorded.

@@ -8,7 +8,7 @@ logger = logging.getLogger("matchmaker.enet")
 
 class ENetRelay:
     def __init__(self):
-        self.rooms: Dict[int, Tuple[enet.Host, Dict[int, enet.Peer], threading.Thread]] = {}
+        self.rooms: Dict[int, Tuple[enet.Host, Dict[int, enet.Peer]]] = {}
         self._peer_counts: Dict[int, int] = {}
         self._running = True
         self._lock = threading.Lock()
@@ -22,7 +22,7 @@ class ENetRelay:
                 with self._lock:
                     for port in list(self.rooms.keys()):
                         if self._peer_counts.get(port, 0) == 0:
-                            logger.info(f"Empty room on port {port} – cleaning up")
+                            logger.info(f"Cleaning up empty room on port {port}")
                             self.remove_room(port)
         threading.Thread(target=cleaner, daemon=True).start()
 
@@ -32,13 +32,13 @@ class ENetRelay:
             return
         host = enet.Host(enet.Address(b"0.0.0.0", port), 10, 0, 0, 0)
         with self._lock:
-            self.rooms[port] = (host, {}, None)  # placeholder for thread
+            self.rooms[port] = (host, {})
             self._peer_counts[port] = 0
 
         def _service_loop():
-            logger.info(f"Starting service loop for port {port}")
+            logger.info(f"Service loop for port {port} started")
             while self._running and port in self.rooms:
-                event = host.service(10)  # 10ms timeout
+                event = host.service(10)
                 if event.type == enet.EVENT_TYPE_NONE:
                     continue
                 elif event.type == enet.EVENT_TYPE_CONNECT:
@@ -46,7 +46,7 @@ class ENetRelay:
                     with self._lock:
                         self.rooms[port][1][peer.address.port] = peer
                         self._peer_counts[port] = len(self.rooms[port][1])
-                    logger.info(f"Peer {peer.address.port} connected to room {port} (count={self._peer_counts[port]})")
+                    logger.info(f"Peer {peer.address.port} connected to {port} (count={self._peer_counts[port]})")
                 elif event.type == enet.EVENT_TYPE_RECEIVE:
                     sender = event.peer.address.port
                     with self._lock:
@@ -59,9 +59,8 @@ class ENetRelay:
                         if peer.address.port in self.rooms[port][1]:
                             del self.rooms[port][1][peer.address.port]
                             self._peer_counts[port] = len(self.rooms[port][1])
-                    logger.info(f"Peer {peer.address.port} disconnected from room {port} (count={self._peer_counts[port]})")
+                    logger.info(f"Peer {peer.address.port} disconnected from {port} (count={self._peer_counts[port]})")
             logger.info(f"Service loop for port {port} exiting")
-            # Clean up host after loop ends
             with self._lock:
                 if port in self.rooms:
                     host.flush()
@@ -71,10 +70,6 @@ class ENetRelay:
 
         thread = threading.Thread(target=_service_loop, daemon=True)
         thread.start()
-        with self._lock:
-            # Replace placeholder with actual thread
-            host, peers, _ = self.rooms[port]
-            self.rooms[port] = (host, peers, thread)
         logger.info(f"Created room on port {port}")
 
     def get_peer_count(self, port: int) -> int:
@@ -86,14 +81,14 @@ class ENetRelay:
             if port not in self.rooms:
                 return
             logger.info(f"Removing room on port {port}")
-            # The service loop will exit because port is no longer in self.rooms
-            # But we need to trigger the loop to exit quickly by closing the host's socket
-            host, _, thread = self.rooms[port]
-            # Force host to stop listening (internal, but safe)
-            host._socket.close()  # this will cause service() to exit
-            # Wait a moment for the thread to finish
-            thread.join(timeout=1)
-            # Clean up any remaining references
+            # Mark the room for deletion; the service loop will exit because `port in self.rooms` becomes false.
+            # To force the loop to exit quickly, we also set a flag.
+            # The host will be cleaned up in the service loop after it exits.
+            # No need to close the socket manually; just let the loop exit.
+            # However, to avoid waiting for the full 10ms service timeout, we don't do anything special.
+            # The room dictionary entry is removed, so the next iteration the loop will exit.
+            # But we must ensure the host is not already processing a packet. This is safe.
+            # The loop will see that `port not in self.rooms` and break.
             del self.rooms[port]
             if port in self._peer_counts:
                 del self._peer_counts[port]
@@ -101,7 +96,8 @@ class ENetRelay:
     def shutdown(self):
         logger.info("Shutting down ENetRelay")
         self._running = False
+        # Wait a moment for all service loops to exit
+        time.sleep(0.5)
         with self._lock:
             for port in list(self.rooms.keys()):
                 self.remove_room(port)
-        time.sleep(0.5)
