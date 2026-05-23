@@ -35,25 +35,28 @@ func _on_room_joined(room_id: String, relay_host: String, relay_port: int):
 
 
 func _connect_to_relay(host: String, port: int):
+	print("Connecting to relay at ", host, ":", port)
 	peer = ENetMultiplayerPeer.new()
 	var err = peer.create_client(host, port)
+	print("create_client returned: ", err)
 	if err != OK:
 		print("Failed to create client: ", err)
 		return
 	
-	var start = Time.get_ticks_msec()
-	while Time.get_ticks_msec() - start < 3000:
-		if peer.get_connection_status() == MultiplayerPeer.CONNECTION_CONNECTED:
+	# Poll connection status for up to 5 seconds
+	var start_time = Time.get_ticks_msec()
+	while Time.get_ticks_msec() - start_time < 5000:
+		var status = peer.get_connection_status()
+		print("Connection status: ", status)
+		if status == MultiplayerPeer.CONNECTION_CONNECTED:
 			multiplayer.multiplayer_peer = peer
-			print("Connected to relay!")
+			print("Successfully connected to relay!")
 			if is_host:
 				await get_tree().create_timer(0.2).timeout
 				rpc_id(1, "_set_host", multiplayer.get_unique_id())
 			return
 		await get_tree().process_frame
-	
-	print("Connection timeout – relay unreachable")
-	# Do not call _cleanup_room here; let user retry
+	print("Connection timeout - never connected")
 
 
 @rpc("any_peer", "reliable")

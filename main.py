@@ -1,179 +1,157 @@
-import asyncio
-import uuid
-import time
+# enet_relay.py
+import enet
 import logging
-import os
-from collections import defaultdict
-from typing import Dict, Tuple, Set
-from contextlib import asynccontextmanager
+import threading
+import time
+from typing import Dict, Tuple, Optional
 
-from fastapi import FastAPI, HTTPException, Depends, Header
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
-from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
-import uvicorn
+logger = logging.getLogger("matchmaker.enet")
 
-from enet_relay import ENetRelay
+class ENetRelay:
+    def __init__(self):
+        self.rooms: Dict[int, Tuple[enet.Host, Dict[int, enet.Peer], threading.Thread, bool]] = {}
+        self._peer_counts: Dict[int, int] = {}
+        self._running = True
+        self._lock = threading.Lock()
+        self._start_empty_room_cleaner()
+        logger.info("ENetRelay initialized")
 
-# ---------- Configuration ----------
-SECRET_KEY = os.getenv("SECRET_KEY", "change-me-in-production")
-PUBLIC_ADDR = os.getenv("PUBLIC_ADDR", "localhost")
-MATCH_TIMEOUT_SECONDS = int(os.getenv("MATCH_TIMEOUT_SECONDS", "60"))
-HTTP_PORT = int(os.getenv("HTTP_PORT", "8000"))
-PORT_START = int(os.getenv("PORT_START", "5555"))
-PORT_END = int(os.getenv("PORT_END", "5560"))
+    def _start_empty_room_cleaner(self):
+        def cleaner():
+            while self._running:
+                time.sleep(30)
+                with self._lock:
+                    for port, (_, _, _, removing) in list(self.rooms.items()):
+                        if removing:
+                            continue  # skip rooms that are already being removed
+                        if self._peer_counts.get(port, 0) == 0:
+                            logger.info(f"Empty room on port {port} – scheduling removal")
+                            # Mark as removing to avoid duplicate attempts
+                            self.rooms[port] = (self.rooms[port][0], self.rooms[port][1], self.rooms[port][2], True)
+                            # Remove outside the lock to avoid deadlock
+                            thread = threading.Thread(target=self._remove_room_safe, args=(port,))
+                            thread.start()
+        threading.Thread(target=cleaner, daemon=True).start()
 
-# ---------- Global Relay ----------
-enet_relay = ENetRelay()
+    def _remove_room_safe(self, port: int):
+        """Remove a room without holding the main lock during I/O."""
+        logger.info(f"Removing room on port {port}")
+        with self._lock:
+            if port not in self.rooms:
+                return
+            host, peers, thread, _ = self.rooms[port]
+        # Force the service loop to exit by closing the host's socket
+        try:
+            # enet.Host has a _socket attribute that we can close to break service()
+            host._socket.close()
+        except Exception as e:
+            logger.warning(f"Could not close socket for port {port}: {e}")
+        # Wait for the thread to finish (give it up to 2 seconds)
+        if thread and thread.is_alive():
+            thread.join(timeout=2)
+        # Now clean up the dictionaries
+        with self._lock:
+            if port in self.rooms:
+                del self.rooms[port]
+            if port in self._peer_counts:
+                del self._peer_counts[port]
+        logger.info(f"Room on port {port} removed successfully")
 
-# ---------- Application state ----------
-rooms: Dict[str, dict] = {}
-room_port: Dict[str, int] = {}
-room_clients: Dict[str, Set[Tuple[str, int]]] = defaultdict(set)
-client_to_room: Dict[Tuple[str, int], str] = {}
-host_token_map: Dict[str, str] = {}
+    def create_room(self, port: int):
+        if port in self.rooms:
+            logger.warning(f"Room on port {port} already exists")
+            return
+        try:
+            host = enet.Host(enet.Address(b"0.0.0.0", port), 10, 0, 0, 0)
+        except Exception as e:
+            logger.error(f"Failed to create ENet host on port {port}: {e}")
+            return
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("matchmaker")
+        with self._lock:
+            self.rooms[port] = (host, {}, None, False)
+            self._peer_counts[port] = 0
 
-# ---------- Pydantic models ----------
-class HostRequest(BaseModel):
-    public_data: dict
-    private_data: dict | None = None
+        def _service_loop():
+            logger.info(f"Service loop for port {port} started")
+            while self._running:
+                with self._lock:
+                    if port not in self.rooms:
+                        break  # room removed, exit loop
+                    # Check if this room is marked for removal
+                    if self.rooms[port][3]:
+                        break
+                try:
+                    event = host.service(10)  # 10ms timeout
+                except Exception as e:
+                    logger.error(f"ENet service error on port {port}: {e}")
+                    break
+                if event.type == enet.EVENT_TYPE_NONE:
+                    continue
+                elif event.type == enet.EVENT_TYPE_CONNECT:
+                    peer = event.peer
+                    with self._lock:
+                        if port in self.rooms:
+                            self.rooms[port][1][peer.address.port] = peer
+                            self._peer_counts[port] = len(self.rooms[port][1])
+                    logger.info(f"Peer {peer.address.port} connected to {port} (count={self._peer_counts.get(port, 0)})")
+                elif event.type == enet.EVENT_TYPE_RECEIVE:
+                    sender = event.peer.address.port
+                    with self._lock:
+                        if port not in self.rooms:
+                            continue
+                        for other_port, peer in self.rooms[port][1].items():
+                            if other_port != sender:
+                                try:
+                                    peer.send(event.channel_id, event.packet)
+                                except Exception as e:
+                                    logger.error(f"Failed to send packet: {e}")
+                elif event.type == enet.EVENT_TYPE_DISCONNECT:
+                    peer = event.peer
+                    with self._lock:
+                        if port in self.rooms and peer.address.port in self.rooms[port][1]:
+                            del self.rooms[port][1][peer.address.port]
+                            self._peer_counts[port] = len(self.rooms[port][1])
+                    logger.info(f"Peer {peer.address.port} disconnected from {port} (count={self._peer_counts.get(port, 0)})")
+            # Clean up after loop exits
+            try:
+                host.flush()
+            except:
+                pass
+            with self._lock:
+                if port in self.rooms:
+                    del self.rooms[port]
+                if port in self._peer_counts:
+                    del self._peer_counts[port]
+            logger.info(f"Service loop for port {port} finished")
 
-class JoinRequest(BaseModel):
-    private_data: dict | None = None
+        thread = threading.Thread(target=_service_loop, daemon=True)
+        thread.start()
+        with self._lock:
+            if port in self.rooms:
+                self.rooms[port] = (host, self.rooms[port][1], thread, False)
+        logger.info(f"Room on port {port} created successfully")
 
-class HeartbeatRequest(BaseModel):
-    room_id: str
+    def get_peer_count(self, port: int) -> int:
+        with self._lock:
+            return self._peer_counts.get(port, 0)
 
-# ---------- FastAPI with lifespan ----------
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    logger.info("Matchmaker starting...")
-    yield
-    enet_relay.shutdown()
-    logger.info("Matchmaker shut down")
+    def remove_room(self, port: int):
+        """Public method to manually remove a room (e.g., via HTTP delete)."""
+        with self._lock:
+            if port not in self.rooms:
+                return
+            # Mark as removing
+            host, peers, thread, _ = self.rooms[port]
+            self.rooms[port] = (host, peers, thread, True)
+        # Use a separate thread to avoid blocking the caller
+        threading.Thread(target=self._remove_room_safe, args=(port,)).start()
 
-app = FastAPI(lifespan=lifespan)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-async def verify_auth(x_api_key: str = Header(...)):
-    if x_api_key != SECRET_KEY:
-        raise HTTPException(status_code=401, detail="Invalid API key")
-
-# ---------- Static dashboard ----------
-static_dir = "static"
-if not os.path.exists(static_dir):
-    os.makedirs(static_dir)
-app.mount("/dashboard", StaticFiles(directory=static_dir, html=True), name="static")
-
-@app.get("/", response_class=HTMLResponse)
-async def root():
-    return """
-    <html><head><meta http-equiv="refresh" content="0; url=/dashboard/dashboard.html"></head>
-    <body>Redirecting to <a href="/dashboard/dashboard.html">dashboard</a>...</body></html>
-    """
-
-@app.post("/host")
-async def host_game(req: HostRequest, auth=Depends(verify_auth)):
-    room_id = str(uuid.uuid4())[:8]
-    # find a free port from your range (e.g., 5555-5560)
-    used_ports = set(room_port.values())
-    relay_port = None
-    for port in range(5555, 5561):
-        if port not in used_ports:
-            relay_port = port
-            break
-    if not relay_port:
-        raise HTTPException(503, "No free UDP ports")
-    # Start the ENet relay for this room
-    enet_relay.create_room(relay_port)   # <<< only this, no register_host
-    host_token = str(uuid.uuid4())[:16]
-    rooms[room_id] = {
-        "room_id": room_id,
-        "public_data": req.public_data,
-        "private_data": req.private_data,
-        "created_at": time.time(),
-        "last_heartbeat": time.time(),
-        "relay_port": relay_port,
-    }
-    room_port[room_id] = relay_port
-    host_token_map[room_id] = host_token
-    logger.info(f"Room {room_id} created on port {relay_port}")
-    return {
-        "room_id": room_id,
-        "relay_host": PUBLIC_ADDR,
-        "relay_port": relay_port,
-        "host_token": host_token,
-    }
-
-@app.get("/rooms")
-async def list_rooms():
-    now = time.time()
-    result = []
-    for rid, room in rooms.items():
-        if now - room["last_heartbeat"] < MATCH_TIMEOUT_SECONDS:
-            player_count = enet_relay.get_peer_count(room["relay_port"])
-            result.append({
-                "room_id": rid,
-                "public_data": room["public_data"],
-                "player_count": player_count,
-                "created_seconds_ago": int(now - room["created_at"])
-            })
-    return {"rooms": result}
-
-@app.post("/join/{room_id}")
-async def join_room(room_id: str, req: JoinRequest, auth=Depends(verify_auth)):
-    if room_id not in rooms:
-        raise HTTPException(status_code=404, detail="Room not found")
-    room = rooms[room_id]
-    if time.time() - room["last_heartbeat"] >= MATCH_TIMEOUT_SECONDS:
-        # Room expired
-        del rooms[room_id]
-        raise HTTPException(status_code=410, detail="Room expired")
-    if room["private_data"] and req.private_data != room["private_data"]:
-        raise HTTPException(status_code=403, detail="Private data mismatch")
-    return {
-        "room_id": room_id,
-        "relay_host": PUBLIC_ADDR,
-        "relay_port": room["relay_port"],
-    }
-
-@app.post("/heartbeat")
-async def heartbeat(req: HeartbeatRequest, auth=Depends(verify_auth)):
-    if req.room_id not in rooms:
-        raise HTTPException(status_code=404, detail="Room not found")
-    rooms[req.room_id]["last_heartbeat"] = time.time()
-    return {"status": "ok"}
-
-@app.delete("/room/{room_id}")
-async def delete_room(room_id: str, host_token: str, auth=Depends(verify_auth)):
-    if room_id not in rooms:
-        raise HTTPException(status_code=404, detail="Room not found")
-    if host_token_map.get(room_id) != host_token:
-        raise HTTPException(status_code=403, detail="Invalid host token")
-    # Stop the ENet relay for this room
-    relay_port = rooms[room_id]["relay_port"]
-    enet_relay.remove_room(relay_port)
-    # Clean up internal state
-    del room_port[room_id]
-    del rooms[room_id]
-    del host_token_map[room_id]
-    # Remove client address mappings
-    for addr, rid in list(client_to_room.items()):
-        if rid == room_id:
-            del client_to_room[addr]
-    if room_id in room_clients:
-        del room_clients[room_id]
-    logger.info(f"Room {room_id} deleted")
-    return {"status": "deleted"}
-
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=HTTP_PORT)
+    def shutdown(self):
+        logger.info("Shutting down ENetRelay")
+        self._running = False
+        with self._lock:
+            ports = list(self.rooms.keys())
+        for port in ports:
+            self.remove_room(port)
+        time.sleep(1)
+        logger.info("ENetRelay shut down")
