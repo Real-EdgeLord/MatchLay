@@ -242,19 +242,17 @@ async def cleanup_expired_rooms():
         now = time.time()
         expired = []
         for rid, room in rooms.items():
-            if now - room["last_heartbeat"] >= MATCH_TIMEOUT_SECONDS:
+            # Treat a room as expired if it has no clients AND has no heartbeat
+            # This prevents zombie rooms from lingering forever
+            if len(room["clients"]) == 0 and now - room["last_heartbeat"] >= MATCH_TIMEOUT_SECONDS:
                 expired.append(rid)
         for rid in expired:
-            # Close transport
+            # Close transport if it exists (it should)
             if "transport" in rooms[rid]:
                 rooms[rid]["transport"].close()
-            # Remove mappings
             for addr in rooms[rid]["clients"]:
                 client_to_room.pop(addr, None)
                 room_clients[rid].discard(addr)
             del room_port[rid]
             del rooms[rid]
-            logger.info(f"Room {rid} expired")
-
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=HTTP_PORT)
+            logger.info(f"Room {rid} expired (no clients)")
