@@ -9,37 +9,51 @@ var is_host: bool = false
 func _ready():
 	api = MatchLayAPI.new()
 	api.init("http://192.168.0.111:8000", "cat")
-	
 	api.room_hosted.connect(_on_room_hosted)
 	api.room_joined.connect(_on_room_joined)
 	api.rooms_received.connect(_on_rooms_recevied)
 	api.error_occurred.connect(_on_api_error)
-	api.room_expired.connect(_on_room_expired)   # <-- connect to expiry signal
-	
+	api.room_expired.connect(_on_room_expired)
 	await get_tree().process_frame
+	# Automatically host for testing
+	#api.host_game({"map": "arena"}, {"password": "123"})
 	
 
 
 
 func _on_room_hosted(room_id: String, relay_host: String, relay_port: int):
 	current_room_id = room_id
+	is_host = true
 	print("Room hosted: ", room_id, " at ", relay_host, ":", relay_port)
-	peer = ENetMultiplayerPeer.new()
-	var err = peer.create_server(relay_port)
-	if err == OK:
-		multiplayer.multiplayer_peer = peer
-		print("ENet server created on port ", relay_port)
-	else:
-		print("Failed to create server: ", err)
+	_connect_to_relay(relay_host, relay_port)
 
 func _on_room_joined(room_id: String, relay_host: String, relay_port: int):
 	current_room_id = room_id
 	is_host = false
 	print("Joined room: ", room_id)
+	_connect_to_relay(relay_host, relay_port)
+
+
+func _connect_to_relay(host: String, port: int):
 	peer = ENetMultiplayerPeer.new()
-	peer.create_client(relay_host, relay_port)
-	multiplayer.multiplayer_peer = peer
-	# Heartbeat automatically started
+	var err = peer.create_client(host, port)
+	if err == OK:
+		multiplayer.multiplayer_peer = peer
+		print("Connected to relay as client")
+		# Wait a bit for the connection to establish, then identify as host if needed
+		await get_tree().create_timer(0.2).timeout
+		if is_host:
+			rpc_id(1, "_set_host", multiplayer.get_unique_id())
+	else:
+		print("Failed to connect: ", err)
+
+
+@rpc("any_peer", "reliable")
+func _set_host(host_id: int):
+	# This RPC will be called on all clients. The host's ID is recorded.
+	# You can store host_id in a global variable.
+	print("Host is peer ", host_id)
+
 
 var _is_cleaning_up: bool = false
 
@@ -121,13 +135,12 @@ func _on_rooms_recevied(rooms: Array):
 
 
 func _on_firerpc_button_down() -> void:
-	var mesage : String = "message from " + str(multiplayer.get_unique_id())
-	print("going to send")
-	fire_rpc.rpc(mesage)
-	pass # Replace with function body.
+	if is_host:
+		rpc("test_rpc", "Hello from host")
+	else:
+		rpc_id(1, "test_rpc", "Hello from client")
 
 
 @rpc("any_peer","reliable")
 func fire_rpc(test_from : String) -> void :
 	print(test_from)
-	print(multiplayer.get_unique_id())
