@@ -3,7 +3,7 @@ class_name MatchLayAPI
 extends RefCounted
 
 signal rooms_received(rooms: Array)
-signal room_hosted(room_id: String, relay_host: String, relay_port: int)
+signal room_hosted(room_id: String, relay_host: String, relay_port: int, host_token: String)
 signal room_joined(room_id: String, relay_host: String, relay_port: int)
 signal error_occurred(code: int, message: String)
 signal room_expired(room_id: String)
@@ -109,6 +109,13 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 	if json.has("rooms"):
 		rooms_received.emit(json.rooms)
 	elif json.has("room_id") and json.has("relay_host") and json.has("relay_port"):
-		room_hosted.emit(json.room_id, json.relay_host, json.relay_port)
+		room_hosted.emit(json.room_id, json.relay_host, json.relay_port, json.get("host_token", ""))
 		room_joined.emit(json.room_id, json.relay_host, json.relay_port)
 		start_heartbeat(json.room_id)
+
+
+
+func close_room(room_id: String, host_token: String) -> void:
+	var headers = ["X-API-Key: " + api_key]
+	var url = server_url + "/room/%s?host_token=%s" % [room_id, host_token]
+	http_request.request(url, headers, HTTPClient.METHOD_DELETE)

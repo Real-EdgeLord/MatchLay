@@ -23,6 +23,7 @@ func _on_room_hosted(room_id: String, relay_host: String, relay_port: int):
 	peer = ENetMultiplayerPeer.new()
 	peer.create_server(relay_port)
 	multiplayer.multiplayer_peer = peer
+	#_ping.rpc()
 	# Heartbeat automatically started by matchlay_api
 
 func _on_room_joined(room_id: String, relay_host: String, relay_port: int):
@@ -52,8 +53,17 @@ func _cleanup_room():
 		peer = null
 	if api:
 		api.stop_heartbeat()
+	if current_room_id and api:
+		api.close_room(current_room_id)
 	current_room_id = ""
+
+
 
 # Optional: clean up when the node exits
 func _exit_tree():
 	_cleanup_room()
+
+
+@rpc("any_peer", "unreliable")
+func _ping():
+	print("Ping received from ", multiplayer.get_remote_sender_id())

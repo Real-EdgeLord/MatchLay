@@ -10,6 +10,6 @@ services:
     environment:
      - SECRET_KEY=your-very-secret-key
      - PUBLIC_ADDR=your.server.ip.address
-     - NORAY_UDP_RELAY_PORTS=5555,5556-5560   # Example: one fixed port + a range
+     - NORAY_UDP_RELAY_PORTS=5556-5560   # Example: one fixed port + a range
      - MATCH_TIMEOUT_SECONDS=60
      - HTTP_PORT=8000
