@@ -20,6 +20,7 @@ func init(url: String, key: String) -> void:
 	api_key = key
 	http_request = HTTPRequest.new()
 	Engine.get_main_loop().root.call_deferred("add_child", http_request)
+	http_request.name = "MatchLay"
 	http_request.timeout = 5
 	http_request.request_completed.connect(_on_request_completed)
 
@@ -31,9 +32,12 @@ func start_heartbeat(room_id: String) -> void:
 	heartbeat_timer.timeout.connect(_send_heartbeat)
 	heartbeat_timer.wait_time = 30.0
 	heartbeat_timer.one_shot = false
-	heartbeat_timer.set_autostart(true)
-	Engine.get_main_loop().root.call_deferred("add_child", heartbeat_timer)
-	heartbeat_timer.start() # Now safe to start, as it's queued to be added.
+	heartbeat_timer.name = "heartbeat_timer"
+	# Add and start both deferred
+	var root = Engine.get_main_loop().root
+	root.call_deferred("add_child", heartbeat_timer)
+	# Use call_deferred to start after addition
+	heartbeat_timer.call_deferred("start")
 
 ## Stop heartbeats (e.g., when room is intentionally closed).
 func stop_heartbeat() -> void:
