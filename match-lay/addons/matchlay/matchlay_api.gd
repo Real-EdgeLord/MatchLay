@@ -74,6 +74,7 @@ func _send_heartbeat() -> void:
 	if not heartbeat_request.request_completed.is_connected(_on_heartbeat_response):
 		heartbeat_request.request_completed.connect(_on_heartbeat_response.bind(heartbeat_request))
 
+
 func _on_heartbeat_response(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray, req: HTTPRequest):
 	if result != HTTPRequest.RESULT_SUCCESS:
 		room_expired.emit(current_room_id)

@@ -19,15 +19,27 @@ func _ready():
 	await get_tree().process_frame
 	
 
+
 func _on_room_hosted(room_id: String, relay_host: String, relay_port: int):
 	current_room_id = room_id
-	is_host = true
 	print("Room hosted: ", room_id, " at ", relay_host, ":", relay_port)
+	
+	# Send raw UDP handshake to register host with relay
+	var udp = PacketPeerUDP.new()
+	udp.connect_to_host(relay_host, relay_port)
+	var handshake = room_id.to_utf8_buffer() + PackedByteArray([0])
+	udp.put_packet(handshake)
+	udp.close()
+	print("Host registration handshake sent")
+	
+	# Now create the ENet server for actual game traffic
 	peer = ENetMultiplayerPeer.new()
-	peer.create_server(relay_port)
-	multiplayer.multiplayer_peer = peer
-	#_ping.rpc()
-	# Heartbeat automatically started by matchlay_api
+	var err = peer.create_server(relay_port)
+	if err == OK:
+		multiplayer.multiplayer_peer = peer
+		print("ENet server created on port ", relay_port)
+	else:
+		print("Failed to create server: ", err)
 
 func _on_room_joined(room_id: String, relay_host: String, relay_port: int):
 	current_room_id = room_id
@@ -119,6 +131,8 @@ func _on_rooms_recevied(rooms: Array):
 
 func _on_firerpc_button_down() -> void:
 	var mesage : String = "message from " + str(multiplayer.get_unique_id())
+	print("going to send")
+	print(mesage)
 	fire_rpc.rpc(mesage)
 	pass # Replace with function body.
 
