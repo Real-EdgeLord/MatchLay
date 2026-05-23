@@ -24,21 +24,8 @@ func _ready():
 func _on_room_hosted(room_id: String, relay_host: String, relay_port: int):
 	current_room_id = room_id
 	print("Room hosted: ", room_id, " at ", relay_host, ":", relay_port)
-
-	# Create a temporary ENet client to register the host with the relay
-	var temp_peer = ENetMultiplayerPeer.new()
-	var err = temp_peer.create_client(relay_host, relay_port)
-	if err == OK:
-		# Wait a moment for the connection to be established, then disconnect
-		await get_tree().create_timer(0.5).timeout
-		temp_peer.close()
-		temp_peer = null
-	else:
-		print("Failed to register host with relay: ", err)
-
-	# Now create the actual server peer
 	peer = ENetMultiplayerPeer.new()
-	err = peer.create_server(relay_port)
+	var err = peer.create_server(relay_port)
 	if err == OK:
 		multiplayer.multiplayer_peer = peer
 		print("ENet server created on port ", relay_port)

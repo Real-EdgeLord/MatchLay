@@ -97,3 +97,13 @@ class ENetRelay:
         with self._lock:
             for port in list(self.rooms.keys()):
                 self.remove_room(port)
+
+
+    def register_host(self, port: int) -> None:
+        with self._lock:
+            if port in self._peer_counts:
+            # Increment count by 1 (host counts as one player)
+                self._peer_counts[port] += 1
+            else:
+                self._peer_counts[port] = 1
+            logger.info(f"Manually registered host for room on port {port}, count={self._peer_counts[port]}")

@@ -2,7 +2,7 @@ services:
   matchmaker:
     build:
       context: https://gittea.destinyend.com/Edge_lord/MatchLay.git
-    container_name: udp-matchmaker
+    container_name: matchlay
     restart: unless-stopped
     ports:
       - "8000:8000"      # HTTP API for matchmaking

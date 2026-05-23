@@ -97,7 +97,8 @@ async def host_game(req: HostRequest, auth=Depends(verify_auth)):
 
     # Start the ENet relay for this room
     enet_relay.create_room(relay_port)
-
+    # Immediately register the host as a player
+    enet_relay.register_host(relay_port)
     host_token = str(uuid.uuid4())[:16]
     rooms[room_id] = {
         "room_id": room_id,
