@@ -1,5 +1,7 @@
 import asyncio
 import uuid
+import socket
+import threading
 import time
 import logging
 import os
@@ -48,21 +50,34 @@ class JoinRequest(BaseModel):
 class HeartbeatRequest(BaseModel):
     room_id: str
 
-# ---------- FastAPI with lifespan ----------
+
+
+
+def start_udp_echo():
+    global _echo_socket
+    if _echo_socket:
+        return
+    _echo_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    _echo_socket.bind(('0.0.0.0', 5557))
+    def _echo_loop():
+        while True:
+            data, addr = _echo_socket.recvfrom(1024)
+            logger.info(f"UDP echo from {addr}: {data}")
+            _echo_socket.sendto(data, addr)
+    threading.Thread(target=_echo_loop, daemon=True).start()
+    logger.info("UDP echo server started on port 5557")
+
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Matchmaker starting...")
+    start_udp_echo()   # <-- add this line
     yield
     enet_relay.shutdown()
     logger.info("Matchmaker shut down")
 
-app = FastAPI(lifespan=lifespan)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
 
 async def verify_auth(x_api_key: str = Header(...)):
     if x_api_key != SECRET_KEY:
