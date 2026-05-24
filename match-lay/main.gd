@@ -120,7 +120,18 @@ func _on_close_button_down() -> void:
 
 
 func _on_join_button_down() -> void:
-	api.join_game(room_to_join_id,room_to_join_Dick)
+	var udp = PacketPeerUDP.new()
+	udp.connect_to_host("192.168.0.111", 5558)
+	udp.put_packet("hello".to_utf8_buffer())
+	await get_tree().create_timer(1).timeout
+	if udp.get_available_packet_count() > 0:
+		var resp = udp.get_packet().get_string_from_utf8()
+		print("UDP echo reply: ", resp)
+	else:
+		print("No UDP reply")
+	
+	
+	#api.join_game(room_to_join_id,room_to_join_Dick)
 
 var room_to_join_id : String = ""
 var room_to_join_Dick : Dictionary = {"password": "123"}

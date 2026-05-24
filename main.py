@@ -88,7 +88,7 @@ async def lifespan(app: FastAPI):
     enet_relay.shutdown()
     logger.info("Matchmaker shut down")
 
-
+app = FastAPI(lifespan=lifespan)
 
 async def verify_auth(x_api_key: str = Header(...)):
     if x_api_key != SECRET_KEY:
