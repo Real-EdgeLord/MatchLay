@@ -1,168 +1,99 @@
 extends Node
 
+const MatchLayAPI = preload("res://scripts/matchlay_api.gd")
+const NorayClient = preload("res://addons/netfox.noray/client.gd")  # adjust path
 
 var api: MatchLayAPI
-var peer: ENetMultiplayerPeer
-var current_room_id: String = ""
-var is_host: bool = false
+var peer: ENetMultiplayerPeer  # still used for actual gameplay? No – NorayClient handles the peer.
 
 func _ready():
 	api = MatchLayAPI.new()
 	api.init("http://192.168.0.111:8000", "cat")
 	api.room_hosted.connect(_on_room_hosted)
 	api.room_joined.connect(_on_room_joined)
-	api.rooms_received.connect(_on_rooms_recevied)
 	api.error_occurred.connect(_on_api_error)
-	api.room_expired.connect(_on_room_expired)
+	# For testing, automatically host after a frame
 	await get_tree().process_frame
-	# Automatically host for testing
-	#api.host_game({"map": "arena"}, {"password": "123"})
-	
+	api.host_game({"map": "arena"}, {"password": "123"})
 
+func _on_room_hosted(room_id: String, noray_host: String, noray_port: int):
+	print("Room hosted with ID: ", room_id)
+	# Use noray client to host
+	NorayClient.host_game(room_id)  # open_id = room_id
+	NorayClient.on_host_game.connect(_on_noray_host_success)
+	NorayClient.on_connection_lost.connect(_on_noray_disconnect)
 
+func _on_noray_host_success(open_id: String, private_data: Variant):
+	print("Noray hosting succeeded, OpenID: ", open_id)
+	# Now the game can start – the MultiplayerPeer is automatically set by netfox.noray
+	# You can now use multiplayer.rpc, etc.
 
-func _on_room_hosted(room_id: String, relay_host: String, relay_port: int):
-	current_room_id = room_id
-	is_host = true
-	print("Room hosted: ", room_id, " at ", relay_host, ":", relay_port)
-	_connect_to_relay(relay_host, relay_port)
+func _on_room_joined(room_id: String, noray_host: String, noray_port: int):
+	print("Joining room: ", room_id)
+	NorayClient.join_game(room_id)
+	NorayClient.on_join_game_success.connect(_on_noray_join_success)
+	NorayClient.on_connection_lost.connect(_on_noray_disconnect)
 
-func _on_room_joined(room_id: String, relay_host: String, relay_port: int):
-	current_room_id = room_id
-	is_host = false
-	print("Joined room: ", room_id)
-	_connect_to_relay(relay_host, relay_port)
+func _on_noray_join_success(open_id: String):
+	print("Noray join succeeded, OpenID: ", open_id)
 
-
-func _connect_to_relay(host: String, port: int):
-	print("Connecting to relay at ", host, ":", port)
-	peer = ENetMultiplayerPeer.new()
-	var err = peer.create_client(host, port)
-	print("create_client returned: ", err)
-	if err != OK:
-		print("Failed to create client: ", err)
-		return
-	
-	# Poll connection status for up to 5 seconds
-	var start_time = Time.get_ticks_msec()
-	while Time.get_ticks_msec() - start_time < 5000:
-		var status = peer.get_connection_status()
-		print("Connection status: ", status)
-		if status == MultiplayerPeer.CONNECTION_CONNECTED:
-			multiplayer.multiplayer_peer = peer
-			print("Successfully connected to relay!")
-			if is_host:
-				await get_tree().create_timer(0.2).timeout
-				rpc_id(1, "_set_host", multiplayer.get_unique_id())
-			return
-		await get_tree().process_frame
-	print("Connection timeout - never connected")
-
-
-@rpc("any_peer", "reliable")
-func _set_host(host_id: int):
-	# This RPC will be called on all clients. The host's ID is recorded.
-	# You can store host_id in a global variable.
-	print("Host is peer ", host_id)
-
-
-var _is_cleaning_up: bool = false
+func _on_noray_disconnect():
+	print("Disconnected from noray")
+	# Clean up, possibly call api.leave_room()
 
 func _on_api_error(code: int, msg: String):
 	print("API error: ", code, " - ", msg)
-	if _is_cleaning_up:
-		return
-	_is_cleaning_up = true
-	_cleanup_room()
-	_is_cleaning_up = false
-
-func _on_room_expired(room_id: String):
-	print("Room expired or server unreachable: ", room_id)
-	# Only react if it's the current room
-	if room_id == current_room_id:
-		_cleanup_room()
-		# Show a UI message: "Connection lost: match closed"
-
-func _cleanup_room():
-	if _is_cleaning_up: return
-	_is_cleaning_up = true
-	if peer:
-		peer.close()
-		multiplayer.multiplayer_peer = null
-		peer = null
-	if api:
-		if is_host:
-			api.close_room()    # Deletes room on server
-		else:
-			api.leave_room()    # Just stops heartbeat locally
-	current_room_id = ""
-	is_host = false
-	_is_cleaning_up = false
 
 
-
-# Optional: clean up when the node exits
-func _exit_tree():
-	_cleanup_room()
-
-
-@rpc("any_peer", "unreliable")
-func _ping():
-	print("Ping received from ", multiplayer.get_remote_sender_id())
-
-
-func _on_host_button_down() -> void:
-	api.host_game({"map": "arena", "max_players": 4}, {"password": "123"})
-
-
-func _on_close_button_down() -> void:
-	_cleanup_room()
-
-
-func _on_join_button_down() -> void:
-	var udp = PacketPeerUDP.new()
-	udp.connect_to_host("192.168.0.111", 5558)
-	udp.put_packet("hello".to_utf8_buffer())
-	await get_tree().create_timer(1).timeout
-	if udp.get_available_packet_count() > 0:
-		var resp = udp.get_packet().get_string_from_utf8()
-		print("UDP echo reply: ", resp)
-	else:
-		print("No UDP reply")
-	
-	
-	#api.join_game(room_to_join_id,room_to_join_Dick)
-
-var room_to_join_id : String = ""
-var room_to_join_Dick : Dictionary = {"password": "123"}
-
-
-func _on_get_rooms_button_down() -> void:
-	api.list_rooms()
-
-
-
-func _on_rooms_recevied(rooms: Array):
-	for room in rooms:
-		var room_id = room["room_id"]
-		var public_data = room["public_data"]
-		var player_count = room["player_count"]
-		var created_seconds_ago = room["created_seconds_ago"]
-		print("Room %s: %s players, data: %s, and created %s seconds ago" % [room_id, player_count, public_data, created_seconds_ago])
-		# Example: store first room ID for joining
-		if rooms.size() > 0:
-			room_to_join_id = rooms[0]["room_id"]
-			#room_to_join_Dick = rooms[0].get("public_data", {})  # private data not exposed
-
-
-
-func _on_firerpc_button_down() -> void:
-	if is_host:
-		fire_rpc.rpc("Hello from host")
-	else:
-		fire_rpc.rpc_id(1, "Hello from client")
-
-
-@rpc("any_peer","reliable")
-func fire_rpc(test_from : String) -> void :
-	print(test_from)
+#func _on_host_button_down() -> void:
+	#api.host_game({"map": "arena", "max_players": 4}, {"password": "123"})
+#
+#
+#func _on_close_button_down() -> void:
+	#_cleanup_room()
+#
+#
+#func _on_join_button_down() -> void:
+	#await get_tree().create_timer(1).timeout
+	#var test_peer = ENetMultiplayerPeer.new()
+	#var err = test_peer.create_client("192.168.0.111", 5559)
+	#print("Test ENet client create_client returned: ", err)
+	#await get_tree().create_timer(2).timeout
+	#print("Test ENet connection status: ", test_peer.get_connection_status())
+	#
+	#
+	##api.join_game(room_to_join_id,room_to_join_Dick)
+#
+#var room_to_join_id : String = ""
+#var room_to_join_Dick : Dictionary = {"password": "123"}
+#
+#
+#func _on_get_rooms_button_down() -> void:
+	#api.list_rooms()
+#
+#
+#
+#func _on_rooms_recevied(rooms: Array):
+	#for room in rooms:
+		#var room_id = room["room_id"]
+		#var public_data = room["public_data"]
+		#var player_count = room["player_count"]
+		#var created_seconds_ago = room["created_seconds_ago"]
+		#print("Room %s: %s players, data: %s, and created %s seconds ago" % [room_id, player_count, public_data, created_seconds_ago])
+		## Example: store first room ID for joining
+		#if rooms.size() > 0:
+			#room_to_join_id = rooms[0]["room_id"]
+			##room_to_join_Dick = rooms[0].get("public_data", {})  # private data not exposed
+#
+#
+#
+#func _on_firerpc_button_down() -> void:
+	#if is_host:
+		#fire_rpc.rpc("Hello from host")
+	#else:
+		#fire_rpc.rpc_id(1, "Hello from client")
+#
+#
+#@rpc("any_peer","reliable")
+#func fire_rpc(test_from : String) -> void :
+	#print(test_from)

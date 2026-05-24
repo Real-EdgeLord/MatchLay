@@ -1,15 +1,48 @@
 services:
-  matchmaker:
-    build:
-      context: https://gittea.destinyend.com/Edge_lord/MatchLay.git
-    container_name: matchlay
+  noray:
+    image: ghcr.io/foxssake/noray:main
+    container_name: noray
     restart: unless-stopped
     ports:
-      - "8000:8000"      # HTTP API for matchmaking
-      - "5555-5560:5555-5560/udp"   # Single UDP relay port
+      - "8890:8890"                 # TCP signalling
+      - "8891:8891"                 # HTTP metrics (optional)
+      - "8809:8809/udp"             # UDP registrar
+      - "50001-50100:50001-50100/udp"   # Relay UDP range
     environment:
-     - SECRET_KEY=your-very-secret-key
-     - PUBLIC_ADDR=your.server.ip.address
-     - NORAY_UDP_RELAY_PORTS=5556-5560   # Example: one fixed port + a range
-     - MATCH_TIMEOUT_SECONDS=60
-     - HTTP_PORT=8000
+      NORAY_OID_LENGTH: 21
+      NORAY_OID_CHARSET: "useandom-26T198340PX75pxJACKVERYMINDBUSHWOLF_GQZbfghjklqvwyzrict"
+      NORAY_PID_LENGTH: 128
+      NORAY_PID_CHARSET: "useandom-26T198340PX75pxJACKVERYMINDBUSHWOLF_GQZbfghjklqvwyzrict"
+      NORAY_SOCKET_HOST: "0.0.0.0"
+      NORAY_SOCKET_PORT: 8890
+      NORAY_HTTP_HOST: "0.0.0.0"
+      NORAY_HTTP_PORT: 8891
+      NORAY_UDP_RELAY_PORTS: "50001-50100"
+      NORAY_UDP_RELAY_TIMEOUT: "30s"
+      NORAY_UDP_RELAY_CLEANUP_INTERVAL: "30s"
+      NORAY_UDP_REGISTRAR_PORT: 8809
+      PUBLIC_ADDR: "192.168.0.111"   # <-- YOUR PUBLIC IP
+      NORAY_LOGLEVEL: "info"
+    networks:
+      - matchlay-net
+
+  matchmaker:
+    build: .
+    container_name: matchmaker
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - SECRET_KEY=cat
+      - PUBLIC_ADDR=192.168.0.111
+      - HTTP_PORT=8000
+      - NORAY_HOST=noray          # internal container name
+      - NORAY_PORT=8890
+    networks:
+      - matchlay-net
+    depends_on:
+      - noray
+
+networks:
+  matchlay-net:
+    driver: bridge
