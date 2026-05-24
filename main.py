@@ -59,21 +59,20 @@ def start_udp_echo():
     if _echo_socket:
         return
     _echo_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    _echo_socket.bind(('0.0.0.0', 5557))
+    _echo_socket.bind(('0.0.0.0', 5550))   # <-- changed to 5550
     def _echo_loop():
         while True:
             data, addr = _echo_socket.recvfrom(1024)
             logger.info(f"UDP echo from {addr}: {data}")
             _echo_socket.sendto(data, addr)
     threading.Thread(target=_echo_loop, daemon=True).start()
-    logger.info("UDP echo server started on port 5557")
+    logger.info("UDP echo server started on port 5550")
 
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Matchmaker starting...")
-    start_udp_echo()
     yield
     enet_relay.shutdown()
     logger.info("Matchmaker shut down")

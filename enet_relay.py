@@ -18,31 +18,30 @@ class ENetRelay:
     def _start_empty_room_cleaner(self):
         def cleaner():
             while self._running:
-                time.sleep(30)
+                time.sleep(60)  # check every 60 seconds
                 with self._lock:
                     for port in list(self.rooms.keys()):
-                        # skip if already marked for removal
-                        if self.rooms[port][3]:
+                        if self.rooms[port][3]:  # already removing
                             continue
                         if self._peer_counts.get(port, 0) == 0:
                             logger.info(f"Empty room on port {port} – scheduling removal")
-                            # Call remove_room in a separate thread to avoid deadlock
-                            def do_remove():
-                                self.remove_room(port)
-                            threading.Thread(target=do_remove, daemon=True).start()
+                            threading.Thread(target=self.remove_room, args=(port,), daemon=True).start()
         threading.Thread(target=cleaner, daemon=True).start()
 
     def create_room(self, port: int):
         if port in self.rooms:
             logger.warning(f"Room on port {port} already exists")
             return
+        # Wait briefly to allow the OS to release the port if it was recently used
+        time.sleep(0.3)
         try:
             host = enet.Host(enet.Address(b"0.0.0.0", port), 10, 0, 0, 0)
         except Exception as e:
             logger.error(f"Failed to create ENet host on port {port}: {e}")
             return
+
         with self._lock:
-            self.rooms[port] = (host, {}, None, False)  # False = not removing
+            self.rooms[port] = (host, {}, None, False)
             self._peer_counts[port] = 0
 
         def _service_loop():
@@ -51,10 +50,10 @@ class ENetRelay:
                 with self._lock:
                     if port not in self.rooms:
                         break
-                    if self.rooms[port][3]:  # removing flag
+                    if self.rooms[port][3]:
                         break
                 try:
-                    event = host.service(10)  # 10ms timeout
+                    event = host.service(10)
                 except Exception as e:
                     logger.error(f"ENet service error on port {port}: {e}")
                     break
@@ -76,8 +75,8 @@ class ENetRelay:
                             if other_port != sender:
                                 try:
                                     peer.send(event.channel_id, event.packet)
-                                except Exception as e:
-                                    logger.error(f"Failed to send packet: {e}")
+                                except:
+                                    pass
                 elif event.type == enet.EVENT_TYPE_DISCONNECT:
                     peer = event.peer
                     with self._lock:
@@ -85,7 +84,7 @@ class ENetRelay:
                             del self.rooms[port][1][peer.address.port]
                             self._peer_counts[port] = len(self.rooms[port][1])
                     logger.info(f"Peer {peer.address.port} disconnected from {port} (count={self._peer_counts.get(port,0)})")
-            # Clean up after loop exits
+            # Cleanup
             try:
                 host.flush()
             except:
@@ -110,22 +109,15 @@ class ENetRelay:
             return self._peer_counts.get(port, 0)
 
     def remove_room(self, port: int):
-        # Step 1: mark the room for removal
         with self._lock:
             if port not in self.rooms:
                 return
             logger.info(f"Marking room on port {port} for removal")
             host, peers, thread, _ = self.rooms[port]
-            self.rooms[port] = (host, peers, thread, True)  # set removing flag
-        # Step 2: force the service loop to exit by closing the host's socket
-        try:
-            host._socket.close()
-        except Exception as e:
-            logger.warning(f"Could not close socket for port {port}: {e}")
-        # Step 3: wait for the service loop thread to finish (max 2 seconds)
+            self.rooms[port] = (host, peers, thread, True)
+        # Wait for service loop to exit (max 2 seconds)
         if thread and thread.is_alive():
             thread.join(timeout=2)
-        # Step 4: final cleanup (the service loop already removed the room, but just in case)
         with self._lock:
             if port in self.rooms:
                 del self.rooms[port]
