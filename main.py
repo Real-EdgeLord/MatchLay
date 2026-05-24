@@ -69,13 +69,16 @@ def start_udp_echo():
 
 
 
+# ---------- FastAPI with lifespan ----------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Matchmaker starting...")
-    start_udp_echo()   # <-- add this line
+    start_udp_echo()   # call the UDP echo test
     yield
     enet_relay.shutdown()
     logger.info("Matchmaker shut down")
+
+app = FastAPI(lifespan=lifespan)
 
 
 
