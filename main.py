@@ -51,6 +51,26 @@ class HeartbeatRequest(BaseModel):
     room_id: str
 
 
+def start_test_enet_server():
+    def run():
+        try:
+            host = enet.Host(enet.Address(b"0.0.0.0", 5559), 10, 0, 0, 0)
+            logger.info("Test ENet server listening on port 5559")
+        except Exception as e:
+            logger.error(f"Failed to start test ENet server: {e}")
+            return
+        while True:
+            event = host.service(100)
+            if event.type == enet.EVENT_TYPE_CONNECT:
+                logger.info(f"Test ENet: client {event.peer.address.port} connected")
+            elif event.type == enet.EVENT_TYPE_RECEIVE:
+                logger.info(f"Test ENet: received {event.packet.data}")
+                event.peer.send(event.channel_id, event.packet)
+            elif event.type == enet.EVENT_TYPE_DISCONNECT:
+                logger.info("Test ENet: client disconnected")
+    threading.Thread(target=run, daemon=True).start()
+
+
 # Global variable for the echo socket
 _echo_socket = None
 
@@ -84,6 +104,7 @@ def start_temp_echo():
 async def lifespan(app: FastAPI):
     start_temp_echo()   # <-- add this line
     logger.info("Matchmaker starting...")
+    start_test_enet_server()
     yield
     enet_relay.shutdown()
     logger.info("Matchmaker shut down")
