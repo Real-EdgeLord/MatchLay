@@ -84,3 +84,22 @@ func start_heartbeat(room_id: String) -> void:
 
 func stop_heartbeat() -> void:
 	pass
+	
+
+func report_player_joined(room_id: String) -> void:
+	var headers = ["Content-Type: application/json", "X-API-Key: " + api_key]
+	var body = JSON.stringify({"room_id": room_id})
+	http_request.request(server_url + "/player_joined", headers, HTTPClient.METHOD_POST, body)
+
+func report_player_left(room_id: String) -> void:
+	var headers = ["Content-Type: application/json", "X-API-Key: " + api_key]
+	var body = JSON.stringify({"room_id": room_id})
+	http_request.request(server_url + "/player_left", headers, HTTPClient.METHOD_POST, body)
+
+
+func leave_room() -> void:
+	# For joiners, just stop heartbeat and clean up locally
+	stop_heartbeat()
+	current_room_id = ""
+	_is_host = false
+	_host_token = ""

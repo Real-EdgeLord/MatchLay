@@ -27,8 +27,8 @@ services:
       - matchlay-net
 
   matchmaker:
-    build: .
-        context: https://gittea.destinyend.com/Edge_lord/MatchLay.git
+    build:
+      context: https://gittea.destinyend.com/Edge_lord/MatchLay.git
     container_name: matchmaker
     restart: unless-stopped
     ports:

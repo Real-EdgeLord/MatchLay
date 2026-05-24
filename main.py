@@ -78,6 +78,7 @@ async def host_game(req: HostRequest, auth=Depends(verify_auth)):
         "private_data": req.private_data,
         "created_at": time.time(),
         "last_heartbeat": time.time(),
+        "player_count": 0,
     }
     host_token_map[room_id] = host_token
     logger.info(f"Room {room_id} created")
@@ -117,6 +118,25 @@ async def join_room(room_id: str, req: JoinRequest, auth=Depends(verify_auth)):
         "noray_host": PUBLIC_ADDR,
         "noray_port": NORAY_PORT,
     }
+
+
+
+@app.post("/player_joined")
+async def player_joined(req: dict, auth=Depends(verify_auth)):
+    room_id = req.get("room_id")
+    if room_id not in rooms:
+        raise HTTPException(404, "Room not found")
+    rooms[room_id]["player_count"] = rooms[room_id].get("player_count", 0) + 1
+    return {"status": "ok"}
+
+@app.post("/player_left")
+async def player_left(req: dict, auth=Depends(verify_auth)):
+    room_id = req.get("room_id")
+    if room_id not in rooms:
+        raise HTTPException(404, "Room not found")
+    rooms[room_id]["player_count"] = max(rooms[room_id].get("player_count", 0) - 1, 0)
+    return {"status": "ok"}
+
 
 @app.post("/heartbeat")
 async def heartbeat(req: HeartbeatRequest, auth=Depends(verify_auth)):
