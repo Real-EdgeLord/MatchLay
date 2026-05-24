@@ -51,7 +51,8 @@ class HeartbeatRequest(BaseModel):
     room_id: str
 
 
-
+# Global variable for the echo socket
+_echo_socket = None
 
 def start_udp_echo():
     global _echo_socket
@@ -69,11 +70,10 @@ def start_udp_echo():
 
 
 
-# ---------- FastAPI with lifespan ----------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Matchmaker starting...")
-    start_udp_echo()   # call the UDP echo test
+    start_udp_echo()
     yield
     enet_relay.shutdown()
     logger.info("Matchmaker shut down")
