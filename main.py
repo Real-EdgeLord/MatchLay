@@ -1,4 +1,4 @@
-# main.py – Matchmaker (no Noray dependency)
+# main.py – Matchmaker with host-key protected heartbeat
 import asyncio
 import uuid
 import time
@@ -7,7 +7,7 @@ import os
 import random
 import string
 from contextlib import asynccontextmanager
-from typing import Dict, Optional, List
+from typing import Dict, Optional
 
 from fastapi import FastAPI, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,7 +20,7 @@ import uvicorn
 SECRET_KEY = os.getenv("SECRET_KEY", "change-me")
 PUBLIC_ADDR = os.getenv("PUBLIC_ADDR", "localhost")
 HTTP_PORT = int(os.getenv("HTTP_PORT", "8000"))
-NORAY_PORT = int(os.getenv("NORAY_PORT", "8890"))   # still needed for port
+NORAY_PORT = int(os.getenv("NORAY_PORT", "8890"))
 MATCH_TIMEOUT_SECONDS = 60
 CLEANUP_INTERVAL_SECONDS = 15
 
@@ -164,7 +164,11 @@ async def join_by_secret(req: JoinBySecretRequest):
     }
 
 @app.post("/room/{room_id}/player")
-async def add_player(room_id: str, req: AddPlayerRequest, x_host_key: str = Header(..., alias="X-Host-Key")):
+async def add_player(
+    room_id: str,
+    req: AddPlayerRequest,
+    x_host_key: str = Header(..., alias="X-Host-Key")
+):
     if room_id not in rooms:
         raise HTTPException(status_code=404, detail="Room not found")
     room = rooms[room_id]
@@ -176,7 +180,11 @@ async def add_player(room_id: str, req: AddPlayerRequest, x_host_key: str = Head
     return {"status": "ok", "player_count": len(room["players"])}
 
 @app.delete("/room/{room_id}/player")
-async def remove_player(room_id: str, req: RemovePlayerRequest, x_host_key: str = Header(..., alias="X-Host-Key")):
+async def remove_player(
+    room_id: str,
+    req: RemovePlayerRequest,
+    x_host_key: str = Header(..., alias="X-Host-Key")
+):
     if room_id not in rooms:
         raise HTTPException(status_code=404, detail="Room not found")
     room = rooms[room_id]
@@ -188,14 +196,28 @@ async def remove_player(room_id: str, req: RemovePlayerRequest, x_host_key: str 
     return {"status": "ok", "player_count": len(room["players"])}
 
 @app.post("/heartbeat")
-async def heartbeat(req: HeartbeatRequest, auth=Depends(verify_auth)):
+async def heartbeat(
+    req: HeartbeatRequest,
+    x_host_key: str = Header(..., alias="X-Host-Key")
+):
+    """
+    Game server keeps room alive. Requires the host key (X-Host-Key header).
+    Must be called every 30-60 seconds, otherwise room expires.
+    """
     if req.room_id not in rooms:
         raise HTTPException(status_code=404, detail="Room not found")
-    rooms[req.room_id]["last_heartbeat"] = time.time()
+    room = rooms[req.room_id]
+    if room["host_key"] != x_host_key:
+        raise HTTPException(status_code=403, detail="Invalid host key")
+    room["last_heartbeat"] = time.time()
     return {"status": "ok"}
 
 @app.delete("/room/{room_id}")
-async def close_room(room_id: str, x_host_key: str = Header(..., alias="X-Host-Key"), auth=Depends(verify_auth)):
+async def close_room(
+    room_id: str,
+    x_host_key: str = Header(..., alias="X-Host-Key"),
+    auth=Depends(verify_auth)
+):
     if room_id not in rooms:
         raise HTTPException(status_code=404, detail="Room not found")
     if rooms[room_id]["host_key"] != x_host_key:
