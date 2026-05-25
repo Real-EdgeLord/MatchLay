@@ -1,4 +1,75 @@
-# 🔌 MatchLay[![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)[![Godot 4.6.3](https://img.shields.io/badge/Godot-4.6.3-478CBF?logo=godot-engine)](https://godotengine.org)[![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?logo=python)](https://python.org)[![FastAPI](https://img.shields.io/badge/FastAPI-0.104-009485?logo=fastapi)](https://fastapi.tiangolo.com)[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](http://makeapullrequest.com)**MatchLay** is a lightweight, self-hosted matchmaker for Godot multiplayer games. It provides a simple HTTP API for hosting and joining game rooms, with built‑in rate limiting, heartbeat expiry, and player tracking – all wrapped in a Godot plugin.This is not a full‑blown backend service. It’s a focused tool that gets your players together and lets you focus on the gameplay. 🎮---## 🚀 Features- **HTTP matchmaker** – host/join rooms with public metadata and optional secrets.- **Room secrets** – 6‑letter codes players use to join.- **Host keys** – per‑room tokens for server‑side management (add/remove players, close room).- **Automatic player tracking** – host is added as first player; player counts are always accurate.- **Heartbeat system** – rooms expire automatically if the game server stops responding.- **Rate limiting** – 60 requests per minute per IP to prevent abuse.- **Dashboard** – live web UI to monitor active rooms.- **Godot plugin** – simple GDScript API with clear signals.- **Docker ready** – one‑command deployment with `docker compose up -d`.---## 📖 Table of Contents- [🔌 MatchLay](#-matchlay)- [🚀 Features](#-features)- [🎮 The Big Picture](#-the-big-picture)  * [The Game Server Flow](#the-game-server-flow)  * [The Player Client Flow](#the-player-client-flow)- [🛠️ Deployment (Docker)](#️-deployment-docker)- [🎮 Godot Client Integration](#-godot-client-integration)- [🔌 API Reference](#-api-reference)  * [Authentication](#authentication)  * [Endpoints](#endpoints)- [🔒 Security & Good Practices](#-security--good-practices)- [📜 License](#-license)- [⚠️ Disclaimer](#️-disclaimer)- [🤖 Certified AI Slop](#-certified-ai-slop)---## 🎮 The Big PictureMatchLay is a **matchmaker** – it helps players find each other. It does **not** handle the actual game connection. That’s what Noray (or any UDP relay) is for.### The Game Server FlowWhen a game server starts, you call `POST /host` to create a room. The matchmaker returns a `secret` (6 letters) and a `host_key` (16 chars). The host shares the `secret` with players, keeps the `host_key` for itself, and starts sending heartbeats every 30 seconds to keep the room alive. When players join via Noray, the host calls `POST /room/{room_id}/player` to update the matchmaker’s player count.### The Player Client FlowPlayers enter the `secret` provided by the host. The matchmaker verifies the secret and returns the `server_oid` (Noray endpoint) and current `player_count`. The player then connects directly to the game server via Noray – the matchmaker is no longer involved in gameplay.This separation keeps the matchmaker simple and fast while letting you plug in any UDP relay you like (Noray, ENet, etc.).---## 🛠️ Deployment (Docker)The easiest way to run the matchmaker is with Docker.1. **Clone the repository**   ```bash   git clone https://github.com/Real-EdgeLord/MatchLay.git   cd MatchLay  
+# 🔌 MatchLay
+
+[![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Godot 4.6.3](https://img.shields.io/badge/Godot-4.6.3-478CBF?logo=godot-engine)](https://godotengine.org)
+[![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?logo=python)](https://python.org)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.104-009485?logo=fastapi)](https://fastapi.tiangolo.com)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](http://makeapullrequest.com)
+
+**MatchLay** is a lightweight, self-hosted matchmaker for Godot multiplayer games. It provides a simple HTTP API for hosting and joining game rooms, with built‑in rate limiting, heartbeat expiry, and player tracking – all wrapped in a Godot plugin.
+
+This is not a full‑blown backend service. It’s a focused tool that gets your players together and lets you focus on the gameplay. 🎮
+
+---
+
+## 🚀 Features
+
+- **HTTP matchmaker** – host/join rooms with public metadata and optional secrets.
+- **Room secrets** – 6‑letter codes players use to join.
+- **Host keys** – per‑room tokens for server‑side management (add/remove players, close room).
+- **Automatic player tracking** – host is added as first player; player counts are always accurate.
+- **Heartbeat system** – rooms expire automatically if the game server stops responding.
+- **Rate limiting** – 60 requests per minute per IP to prevent abuse.
+- **Dashboard** – live web UI to monitor active rooms.
+- **Godot plugin** – simple GDScript API with clear signals.
+- **Docker ready** – one‑command deployment with `docker compose up -d`.
+
+---
+
+## 📖 Table of Contents
+
+- [🔌 MatchLay](#-matchlay)
+- [🚀 Features](#-features)
+- [🎮 The Big Picture](#-the-big-picture)
+  * [The Game Server Flow](#the-game-server-flow)
+  * [The Player Client Flow](#the-player-client-flow)
+- [🛠️ Deployment (Docker)](#️-deployment-docker)
+- [🎮 Godot Client Integration](#-godot-client-integration)
+- [🔌 API Reference](#-api-reference)
+  * [Authentication](#authentication)
+  * [Endpoints](#endpoints)
+- [🔒 Security & Good Practices](#-security--good-practices)
+- [📜 License](#-license)
+- [⚠️ Disclaimer](#️-disclaimer)
+- [🤖 Certified AI Slop](#-certified-ai-slop)
+
+---
+
+## 🎮 The Big Picture
+
+MatchLay is a **matchmaker** – it helps players find each other. It does **not** handle the actual game connection. That’s what Noray (or any UDP relay) is for.
+
+### The Game Server Flow
+
+When a game server starts, you call `POST /host` to create a room. The matchmaker returns a `secret` (6 letters) and a `host_key` (16 chars). The host shares the `secret` with players, keeps the `host_key` for itself, and starts sending heartbeats every 30 seconds to keep the room alive. When players join via Noray, the host calls `POST /room/{room_id}/player` to update the matchmaker’s player count.
+
+### The Player Client Flow
+
+Players enter the `secret` provided by the host. The matchmaker verifies the secret and returns the `server_oid` (Noray endpoint) and current `player_count`. The player then connects directly to the game server via Noray – the matchmaker is no longer involved in gameplay.
+
+This separation keeps the matchmaker simple and fast while letting you plug in any UDP relay you like (Noray, ENet, etc.).
+
+---
+
+## 🛠️ Deployment (Docker)
+
+The easiest way to run the matchmaker is with Docker.
+
+1. **Clone the repository**
+
+   ```bash
+   git clone https://github.com/Real-EdgeLord/MatchLay.git
+   cd MatchLay
 1. **Configure environment variables**  
 2. Edit docker-compose.yml and set your PUBLIC_ADDR and SECRET_KEY:  
 3. yaml  
