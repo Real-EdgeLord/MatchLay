@@ -1,99 +1,102 @@
 extends Node
 
-const MatchLayAPI = preload("res://scripts/matchlay_api.gd")
-const NorayClient = preload("res://addons/netfox.noray/client.gd")  # adjust path
+# UI references (adjust to your actual scene tree)
+@export var host_button : Button
+@export var join_button : Button
+@export var refresh_button : Button
+@export var sendrpc : Button
+@export var room_list : ItemList
+@export var status_label :Label
+@export var line : LineEdit
 
-var api: MatchLayAPI
-var peer: ENetMultiplayerPeer  # still used for actual gameplay? No – NorayClient handles the peer.
+# State
+var noray_connected = false
+var handshake = null
+var my_room_id = ""
+var my_room_secret = ""
+var is_host = false
+var player_count := 0
+var matchmaker : MatchLayAPI = null
+
+var host_oid: String 
 
 func _ready():
-	api = MatchLayAPI.new()
-	api.init("http://192.168.0.111:8000", "cat")
-	api.room_hosted.connect(_on_room_hosted)
-	api.room_joined.connect(_on_room_joined)
-	api.error_occurred.connect(_on_api_error)
-	# For testing, automatically host after a frame
-	await get_tree().process_frame
-	api.host_game({"map": "arena"}, {"password": "123"})
+	host_button.pressed.connect(host_game)
+	join_button.pressed.connect(_on_JoinButton_pressed)
+	refresh_button.pressed.connect(_on_RefreshButton_pressed)
+	sendrpc.pressed.connect(_on_fire_rpc)
+	# Connect to the Noray server
+	var err = await Noray.connect_to_host("192.168.0.111", 8890)
+	if err != OK:
+		print("Failed to connect to Noray server")
+		return
+	print("Connected to Noray server")
 
-func _on_room_hosted(room_id: String, noray_host: String, noray_port: int):
-	print("Room hosted with ID: ", room_id)
-	# Use noray client to host
-	NorayClient.host_game(room_id)  # open_id = room_id
-	NorayClient.on_host_game.connect(_on_noray_host_success)
-	NorayClient.on_connection_lost.connect(_on_noray_disconnect)
-
-func _on_noray_host_success(open_id: String, private_data: Variant):
-	print("Noray hosting succeeded, OpenID: ", open_id)
-	# Now the game can start – the MultiplayerPeer is automatically set by netfox.noray
-	# You can now use multiplayer.rpc, etc.
-
-func _on_room_joined(room_id: String, noray_host: String, noray_port: int):
-	print("Joining room: ", room_id)
-	NorayClient.join_game(room_id)
-	NorayClient.on_join_game_success.connect(_on_noray_join_success)
-	NorayClient.on_connection_lost.connect(_on_noray_disconnect)
-
-func _on_noray_join_success(open_id: String):
-	print("Noray join succeeded, OpenID: ", open_id)
-
-func _on_noray_disconnect():
-	print("Disconnected from noray")
-	# Clean up, possibly call api.leave_room()
-
-func _on_api_error(code: int, msg: String):
-	print("API error: ", code, " - ", msg)
-
-
-func _on_host_button_down() -> void:
-	api.host_game({"map": "arena", "max_players": 4}, {"password": "123"})
-
-
-func _on_close_button_down() -> void:
-	_cleanup_room()
-
-
-func _on_join_button_down() -> void:
-	await get_tree().create_timer(1).timeout
-	var test_peer = ENetMultiplayerPeer.new()
-	var err = test_peer.create_client("192.168.0.111", 5559)
-	print("Test ENet client create_client returned: ", err)
-	await get_tree().create_timer(2).timeout
-	print("Test ENet connection status: ", test_peer.get_connection_status())
+# ===== BUTTON ACTIONS =====
+func host_game():
+	# 1. Register as a host with the noray server
+	Noray.register_host()
 	
+	# 2. Wait for the server to assign you a Private ID
+	await Noray.on_pid
 	
-	#api.join_game(room_to_join_id,room_to_join_Dick)
+	# 3. Register your local port with the remote address
+	var err = await Noray.register_remote()
+	if err != OK:
+		print("Failed to register remote address: ", error_string(err))
+		return
+	
+	# 4. Now Noray.local_port is valid — use it to start the server
+	print("Registered local port: ", Noray.local_port)
+	var peer = ENetMultiplayerPeer.new()
+	err = peer.create_server(Noray.local_port)
+	if err != OK:
+		print("Failed to create server on port ", Noray.local_port, ": ", error_string(err))
+		return
+	
+	multiplayer.multiplayer_peer = peer
+	print("Server listening on port ", Noray.local_port)
+	print("Share this Open ID with your friend: ", Noray.oid)
+	status_label.text = Noray.oid
 
-var room_to_join_id : String = ""
-var room_to_join_Dick : Dictionary = {"password": "123"}
+func _on_JoinButton_pressed():
+	# Step 1: Register as host
+	Noray.register_host()
+	await Noray.on_pid          # Wait for Private ID
+	print("Got PID: ", Noray.pid)
+
+	# Step 2: Register local port with Noray server (critical!)
+	var err = await Noray.register_remote()
+	if err != OK:
+		print("Failed to register remote address: ", error_string(err))
+		return
+	print("Registered remote address. Local port: ", Noray.local_port)
+	# Connect using NAT punchthrough
+	Noray.connect_nat(host_oid)
+
+	# Wait for the NAT connection signal
+	Noray.on_connect_nat.connect(_on_nat_connected)
+
+func _on_nat_connected(address: String, port: int):
+	# Create an ENet client and connect to the host's address/port
+	var peer = ENetMultiplayerPeer.new()
+	var err = peer.create_client(address, port)
+	if err != OK:
+		print("Failed to join game")
+		return
+
+	multiplayer.multiplayer_peer = peer
+	print("Connected to host. My peer ID: ", multiplayer.get_unique_id())
+
+func _on_RefreshButton_pressed():
+	host_oid = line.text
 
 
-func _on_get_rooms_button_down() -> void:
-	api.list_rooms()
-
-
-
-func _on_rooms_recevied(rooms: Array):
-	for room in rooms:
-		var room_id = room["room_id"]
-		var public_data = room["public_data"]
-		var player_count = room["player_count"]
-		var created_seconds_ago = room["created_seconds_ago"]
-		print("Room %s: %s players, data: %s, and created %s seconds ago" % [room_id, player_count, public_data, created_seconds_ago])
-		# Example: store first room ID for joining
-		if rooms.size() > 0:
-			room_to_join_id = rooms[0]["room_id"]
-			#room_to_join_Dick = rooms[0].get("public_data", {})  # private data not exposed
-
-
-
-func _on_firerpc_button_down() -> void:
-	if is_host:
-		fire_rpc.rpc("Hello from host")
-	else:
-		fire_rpc.rpc_id(1, "Hello from client")
+func _on_fire_rpc() -> void :
+	the_rpc_called.rpc(str(multiplayer.get_unique_id()))
 
 
 @rpc("any_peer","reliable")
-func fire_rpc(test_from : String) -> void :
-	print(test_from)
+func the_rpc_called (mes : String) -> void :
+	
+	print(mes)

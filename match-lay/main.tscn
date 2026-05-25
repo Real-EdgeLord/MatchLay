@@ -2,7 +2,7 @@
 
 [ext_resource type="Script" uid="uid://cbfgpq5tehg6m" path="res://main.gd" id="1_ig7tw"]
 
-[node name="Control" type="Control" unique_id=1680629949]
+[node name="Control" type="Control" unique_id=1680629949 node_paths=PackedStringArray("host_button", "join_button", "refresh_button", "sendrpc", "room_list", "status_label", "line")]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -10,6 +10,13 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_ig7tw")
+host_button = NodePath("Panel/VBoxContainer/HBoxContainer/Host")
+join_button = NodePath("Panel/VBoxContainer/HBoxContainer/Join")
+refresh_button = NodePath("Panel/VBoxContainer/HBoxContainer/GetRooms")
+sendrpc = NodePath("Panel/VBoxContainer/HBoxContainer/firerpc")
+room_list = NodePath("ItemList")
+status_label = NodePath("Label")
+line = NodePath("LineEdit")
 
 [node name="Panel" type="Panel" parent="." unique_id=919869482]
 layout_mode = 0
@@ -47,8 +54,21 @@ text = "Join First"
 layout_mode = 2
 text = "FireRPC"
 
-[connection signal="button_down" from="Panel/VBoxContainer/HBoxContainer/Host" to="." method="_on_host_button_down"]
-[connection signal="button_down" from="Panel/VBoxContainer/HBoxContainer/Close" to="." method="_on_close_button_down"]
-[connection signal="button_down" from="Panel/VBoxContainer/HBoxContainer/GetRooms" to="." method="_on_get_rooms_button_down"]
-[connection signal="button_down" from="Panel/VBoxContainer/HBoxContainer/Join" to="." method="_on_join_button_down"]
-[connection signal="button_down" from="Panel/VBoxContainer/HBoxContainer/firerpc" to="." method="_on_firerpc_button_down"]
+[node name="Label" type="Label" parent="." unique_id=1983839013]
+layout_mode = 0
+offset_right = 445.0
+offset_bottom = 23.0
+
+[node name="ItemList" type="ItemList" parent="." unique_id=351457901]
+layout_mode = 0
+offset_left = 48.0
+offset_top = 101.0
+offset_right = 357.0
+offset_bottom = 435.0
+
+[node name="LineEdit" type="LineEdit" parent="." unique_id=1782205658]
+layout_mode = 0
+offset_left = 48.0
+offset_top = 51.0
+offset_right = 421.0
+offset_bottom = 82.0
