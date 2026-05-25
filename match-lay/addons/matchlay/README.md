@@ -24,11 +24,11 @@ This plugin provides a **GDScript client** for the MatchLay matchmaker. It handl
 var api = MatchLayAPI.new()
 add_child(api)
 api.init("http://your-matchmaker-server:8000", "your-secret-key")
-
+```
     your-secret-key must match the SECRET_KEY environment variable of your MatchLay server.
 
 2. Host a Game (Game Server)
-gdscript
+```gdscript
 
 api.room_hosted.connect(_on_room_hosted)
 
@@ -39,9 +39,9 @@ func _on_room_hosted(room_id: String, secret: String, host_key: String):
     print("Room created! Share this secret with players: ", secret)
     # The host_key is stored internally – you don't need to use it directly.
     # The plugin automatically adds the host as the first player.
-
+```
 3. Join a Game (Player Client)
-gdscript
+```gdscript
 
 api.room_joined.connect(_on_room_joined)
 
@@ -52,9 +52,9 @@ func _on_room_joined(room_id: String, server_oid: String, player_count: int):
     print("Joined room ", room_id, " | server OID: ", server_oid)
     # Now connect your Noray client to the server_oid and the Noray host/port
     # (those are configured on the Noray server, not in MatchLay)
-
+```
 4. Handle Errors & Expiry
-gdscript
+```gdscript
 
 api.error_occurred.connect(_on_error)
 api.room_expired.connect(_on_room_expired)
@@ -65,7 +65,7 @@ func _on_error(code: int, message: String):
 func _on_room_expired(room_id: String):
     print("Room ", room_id, " expired or was closed")
     # Clean up local game state
-
+```
 📡 Signals (Full List)
 Signal	Arguments	Description
 rooms_listed	rooms: Array	Response to list_rooms(). Each room contains room_id, public_data, player_count, match_time.
