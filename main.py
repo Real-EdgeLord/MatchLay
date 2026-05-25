@@ -1,4 +1,4 @@
-# main.py – Matchmaker with rate limiting and global API key for all endpoints
+# main.py – Matchmaker with public /rooms for dashboard
 import asyncio
 import uuid
 import time
@@ -24,7 +24,7 @@ SECRET_KEY = os.getenv("SECRET_KEY", "change-me")
 HTTP_PORT = int(os.getenv("HTTP_PORT", "8000"))
 MATCH_TIMEOUT_SECONDS = 60
 CLEANUP_INTERVAL_SECONDS = 15
-RATE_LIMIT = "60/minute"   # 60 requests per minute per IP
+RATE_LIMIT = "60/minute"
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("matchmaker")
@@ -90,7 +90,6 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-# Global API key dependency
 async def verify_auth(x_api_key: str = Header(..., alias="X-API-Key")):
     if x_api_key != SECRET_KEY:
         raise HTTPException(status_code=401, detail="Invalid API key")
@@ -109,6 +108,22 @@ async def root():
 @limiter.limit(RATE_LIMIT)
 async def health(request: Request):
     return {"status": "alive"}
+
+# ---------- Public endpoints ----------
+@app.get("/rooms")
+@limiter.limit(RATE_LIMIT)
+async def list_rooms(request: Request):   # No API key required
+    now = time.time()
+    result = []
+    for room_id, room in rooms.items():
+        if now - room["last_heartbeat"] < MATCH_TIMEOUT_SECONDS:
+            result.append({
+                "room_id": room_id,
+                "public_data": room["public_data"],
+                "player_count": len(room["players"]),
+                "match_time": room["match_time"],
+            })
+    return {"rooms": result}
 
 # ---------- Protected endpoints (require X-API-Key) ----------
 @app.post("/host")
@@ -134,21 +149,6 @@ async def host_game(request: Request, req: HostRequest, auth=Depends(verify_auth
         "secret": secret,
         "host_key": host_key,
     }
-
-@app.get("/rooms")
-@limiter.limit(RATE_LIMIT)
-async def list_rooms(request: Request, auth=Depends(verify_auth)):
-    now = time.time()
-    result = []
-    for room_id, room in rooms.items():
-        if now - room["last_heartbeat"] < MATCH_TIMEOUT_SECONDS:
-            result.append({
-                "room_id": room_id,
-                "public_data": room["public_data"],
-                "player_count": len(room["players"]),
-                "match_time": room["match_time"],
-            })
-    return {"rooms": result}
 
 @app.post("/join")
 @limiter.limit(RATE_LIMIT)

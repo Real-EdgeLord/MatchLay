@@ -99,7 +99,8 @@ func _internal_join_with_room_id(room_id: String) -> void:
 	_http.request(server_url + "/join/" + room_id, headers, HTTPClient.METHOD_POST)
 
 func _internal_list_rooms() -> void:
-	var headers = ["X-API-Key: " + api_key]
+	# No API key needed for public /rooms endpoint
+	var headers = ["Content-Type: application/json"]
 	_http.request(server_url + "/rooms", headers, HTTPClient.METHOD_GET)
 
 func _internal_add_player(player_oid: String) -> void:
