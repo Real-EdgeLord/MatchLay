@@ -22,7 +22,7 @@
     <div class="timestamp" id="timestamp"></div>
     <table id="roomsTable">
         <thead>
-            <tr><th>Room ID</th><th>Public Data</th><th>Players</th><th>Match Time (s)</th><th>Age (s)</th></tr>
+            <tr><th>Room ID</th><th>Public Data</th><th>Players</th><th>Match Time (s)</th></tr>
         </thead>
         <tbody></tbody>
     </table>
@@ -39,7 +39,6 @@
                     row.insertCell(1).textContent = JSON.stringify(room.public_data);
                     row.insertCell(2).textContent = room.player_count;
                     row.insertCell(3).textContent = room.match_time !== null ? room.match_time : '—';
-                    row.insertCell(4).textContent = room.created_seconds_ago;
                 }
                 document.getElementById('timestamp').textContent = 'Last update: ' + new Date().toLocaleTimeString();
             } catch (err) {

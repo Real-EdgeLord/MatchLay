@@ -21,7 +21,7 @@ services:
       NORAY_UDP_RELAY_TIMEOUT: "30s"
       NORAY_UDP_RELAY_CLEANUP_INTERVAL: "30s"
       NORAY_UDP_REGISTRAR_PORT: 8809
-      PUBLIC_ADDR: "192.168.0.111"   # <-- YOUR PUBLIC IP
+      PUBLIC_ADDR: "192.168.0.111"   # CHANGE THIS, Example "181.181.181.181" or "https://cat.com"
       NORAY_LOGLEVEL: "info"
     networks:
       - matchlay-net
@@ -34,10 +34,10 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - SECRET_KEY=cat
-      - PUBLIC_ADDR=192.168.0.111
+      - SECRET_KEY=                # CHANGE THIS, Example "D3Fbw2*32f2a1fdsw"
+      - PUBLIC_ADDR=192.168.0.111  # CHANGE THIS, Example "181.181.181.181" or "https://cat.com"
       - HTTP_PORT=8000
-      - NORAY_HOST=noray          # internal container name
+      - NORAY_HOST=noray          
       - NORAY_PORT=8890
     networks:
       - matchlay-net

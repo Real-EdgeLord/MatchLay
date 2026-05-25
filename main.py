@@ -1,4 +1,4 @@
-# main.py – Matchmaker with host-key protected heartbeat
+# main.py – Matchmaker with rate limiting and global API key for all endpoints
 import asyncio
 import uuid
 import time
@@ -9,23 +9,33 @@ import string
 from contextlib import asynccontextmanager
 from typing import Dict, Optional
 
-from fastapi import FastAPI, HTTPException, Depends, Header
+from fastapi import FastAPI, HTTPException, Depends, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 import uvicorn
 
 # ---------- Configuration ----------
-SECRET_KEY = os.getenv("SECRET_KEY", "change-me")
-PUBLIC_ADDR = os.getenv("PUBLIC_ADDR", "localhost")
+SECRET_KEY = os.getenv("SECRET_KEY", "change-me")          # Global API key
 HTTP_PORT = int(os.getenv("HTTP_PORT", "8000"))
-NORAY_PORT = int(os.getenv("NORAY_PORT", "8890"))
 MATCH_TIMEOUT_SECONDS = 60
 CLEANUP_INTERVAL_SECONDS = 15
 
+# Rate limiting: allow 30 requests per minute per IP (adjust as needed)
+RATE_LIMIT = "30/minute"
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("matchmaker")
+
+# ---------- Rate limiter setup ----------
+limiter = Limiter(key_func=get_remote_address)
+app = FastAPI(lifespan=lifespan)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # ---------- State ----------
 rooms: Dict[str, dict] = {}
@@ -35,7 +45,6 @@ class HostRequest(BaseModel):
     server_oid: str
     match_time: Optional[int] = None
     public_data: Optional[dict] = None
-    private_data: Optional[dict] = None
 
 class JoinBySecretRequest(BaseModel):
     secret: str
@@ -80,13 +89,18 @@ async def cleanup_rooms_loop():
         for room_id in to_delete:
             del rooms[room_id]
 
-# ---------- FastAPI ----------
-app = FastAPI(lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
-
-async def verify_auth(x_api_key: str = Header(...)):
+# ---------- Global API key dependency ----------
+async def verify_auth(x_api_key: str = Header(..., alias="X-API-Key")):
     if x_api_key != SECRET_KEY:
         raise HTTPException(status_code=401, detail="Invalid API key")
+
+# Optional: make health check public (no key required)
+async def optional_auth(x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
+    # For endpoints that can be optionally protected, but we'll use verify_auth for most.
+    pass
+
+# ---------- FastAPI app ----------
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 # Static dashboard
 static_dir = "static"
@@ -99,12 +113,14 @@ async def root():
     return '<html><head><meta http-equiv="refresh" content="0; url=/dashboard/dashboard.html"></head><body>Redirecting...</body></html>'
 
 @app.get("/health")
-async def health():
+@limiter.limit(RATE_LIMIT)   # still rate limited but no API key required
+async def health(request: Request):
     return {"status": "alive"}
 
-# ---------- API Endpoints ----------
+# ---------- Protected endpoints (require X-API-Key) ----------
 @app.post("/host")
-async def host_game(req: HostRequest, auth=Depends(verify_auth)):
+@limiter.limit(RATE_LIMIT)
+async def host_game(request: Request, req: HostRequest, auth=Depends(verify_auth)):
     room_id = str(uuid.uuid4())[:8]
     host_key = str(uuid.uuid4())[:16]
     secret = generate_room_secret()
@@ -115,7 +131,6 @@ async def host_game(req: HostRequest, auth=Depends(verify_auth)):
         "server_oid": req.server_oid,
         "match_time": req.match_time,
         "public_data": req.public_data or {},
-        "private_data": req.private_data,
         "created_at": time.time(),
         "last_heartbeat": time.time(),
         "players": [],
@@ -125,13 +140,11 @@ async def host_game(req: HostRequest, auth=Depends(verify_auth)):
         "room_id": room_id,
         "secret": secret,
         "host_key": host_key,
-        "noray_host": PUBLIC_ADDR,
-        "noray_port": NORAY_PORT,
-        "server_oid": req.server_oid,
     }
 
 @app.get("/rooms")
-async def list_rooms():
+@limiter.limit(RATE_LIMIT)
+async def list_rooms(request: Request, auth=Depends(verify_auth)):
     now = time.time()
     result = []
     for room_id, room in rooms.items():
@@ -140,13 +153,13 @@ async def list_rooms():
                 "room_id": room_id,
                 "public_data": room["public_data"],
                 "player_count": len(room["players"]),
-                "created_seconds_ago": int(now - room["created_at"]),
                 "match_time": room["match_time"],
             })
     return {"rooms": result}
 
 @app.post("/join")
-async def join_by_secret(req: JoinBySecretRequest):
+@limiter.limit(RATE_LIMIT)
+async def join_by_secret(request: Request, req: JoinBySecretRequest, auth=Depends(verify_auth)):
     found_room = None
     for room in rooms.values():
         if room["secret"] == req.secret:
@@ -159,15 +172,31 @@ async def join_by_secret(req: JoinBySecretRequest):
     return {
         "room_id": found_room["room_id"],
         "server_oid": found_room["server_oid"],
-        "noray_host": PUBLIC_ADDR,
-        "noray_port": NORAY_PORT,
+        "player_count": len(found_room["players"]),
+    }
+
+@app.post("/join/{room_id}")
+@limiter.limit(RATE_LIMIT)
+async def join_by_room_id(request: Request, room_id: str, auth=Depends(verify_auth)):
+    if room_id not in rooms:
+        raise HTTPException(status_code=404, detail="Room not found")
+    room = rooms[room_id]
+    if time.time() - room["last_heartbeat"] >= MATCH_TIMEOUT_SECONDS:
+        raise HTTPException(status_code=410, detail="Room expired")
+    return {
+        "room_id": room_id,
+        "server_oid": room["server_oid"],
+        "player_count": len(room["players"]),
     }
 
 @app.post("/room/{room_id}/player")
+@limiter.limit(RATE_LIMIT)
 async def add_player(
+    request: Request,
     room_id: str,
     req: AddPlayerRequest,
-    x_host_key: str = Header(..., alias="X-Host-Key")
+    x_host_key: str = Header(..., alias="X-Host-Key"),
+    auth=Depends(verify_auth)
 ):
     if room_id not in rooms:
         raise HTTPException(status_code=404, detail="Room not found")
@@ -180,10 +209,13 @@ async def add_player(
     return {"status": "ok", "player_count": len(room["players"])}
 
 @app.delete("/room/{room_id}/player")
+@limiter.limit(RATE_LIMIT)
 async def remove_player(
+    request: Request,
     room_id: str,
     req: RemovePlayerRequest,
-    x_host_key: str = Header(..., alias="X-Host-Key")
+    x_host_key: str = Header(..., alias="X-Host-Key"),
+    auth=Depends(verify_auth)
 ):
     if room_id not in rooms:
         raise HTTPException(status_code=404, detail="Room not found")
@@ -196,14 +228,13 @@ async def remove_player(
     return {"status": "ok", "player_count": len(room["players"])}
 
 @app.post("/heartbeat")
+@limiter.limit(RATE_LIMIT)
 async def heartbeat(
+    request: Request,
     req: HeartbeatRequest,
-    x_host_key: str = Header(..., alias="X-Host-Key")
+    x_host_key: str = Header(..., alias="X-Host-Key"),
+    auth=Depends(verify_auth)
 ):
-    """
-    Game server keeps room alive. Requires the host key (X-Host-Key header).
-    Must be called every 30-60 seconds, otherwise room expires.
-    """
     if req.room_id not in rooms:
         raise HTTPException(status_code=404, detail="Room not found")
     room = rooms[req.room_id]
@@ -213,7 +244,9 @@ async def heartbeat(
     return {"status": "ok"}
 
 @app.delete("/room/{room_id}")
+@limiter.limit(RATE_LIMIT)
 async def close_room(
+    request: Request,
     room_id: str,
     x_host_key: str = Header(..., alias="X-Host-Key"),
     auth=Depends(verify_auth)
