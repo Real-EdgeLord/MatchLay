@@ -178,13 +178,14 @@ func _on_player_count_updated(_room_id: String, _player_count: int) -> void :
 	pass
 
 
-func _on_room_joined(_room_id: String, _server_oid: String, _noray_host: String, _noray_port: int) -> void :
-	my_room_id = _room_id
-	room_oid = _server_oid
+func _on_room_joined(room_id: String, server_oid: String, _player_count: int) -> void :
+	my_room_id = room_id
+	room_oid = server_oid
+	player_count = player_count
 	pass
 
 
-func _on_room_hosted(room_id: String, secret: String, _host_key: String, _noray_host: String, _noray_port: int, _server_oid: String) -> void :
+func _on_room_hosted(room_id: String, secret: String, _host_key: String) -> void :
 	my_room_id = room_id
 	my_room_secret = secret
 	pass

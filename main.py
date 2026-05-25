@@ -26,7 +26,7 @@ MATCH_TIMEOUT_SECONDS = 60
 CLEANUP_INTERVAL_SECONDS = 15
 
 # Rate limiting: allow 30 requests per minute per IP (adjust as needed)
-RATE_LIMIT = "30/minute"
+RATE_LIMIT = "60/minute"
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("matchmaker")
