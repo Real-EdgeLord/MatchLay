@@ -43,6 +43,11 @@ services:
       - matchlay-net
     depends_on:
       - noray
+    healthcheck:
+    test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+    interval: 30s
+    timeout: 5s
+    retries: 3
 
 networks:
   matchlay-net:
