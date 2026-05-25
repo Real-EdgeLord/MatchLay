@@ -34,8 +34,13 @@ var _health_http: HTTPRequest = null
 
 # ----------------------------- Public API -----------------------------
 func init(url: String, key: String) -> void:
-	server_url = url.rstrip("/")
+	# Ensure the URL has a scheme (http:// or https://)
+	var full_url = url.strip_edges()
+	if not full_url.begins_with("http://") and not full_url.begins_with("https://"):
+		full_url = "http://" + full_url
+	server_url = full_url.rstrip("/")   # remove trailing slash if any
 	api_key = key
+	
 	_http = HTTPRequest.new()
 	_health_http = HTTPRequest.new()
 	add_child(_http)
@@ -43,6 +48,7 @@ func init(url: String, key: String) -> void:
 	_http.timeout = MAIN_REQUEST_TIMEOUT
 	_health_http.timeout = HEALTH_TIMEOUT
 	_http.request_completed.connect(_on_request_completed)
+	print("MatchLayAPI ready at ", server_url)   # debug
 
 func host_game(server_oid: String, match_time: int = 0, public_data: Dictionary = {}) -> void:
 	_check_health_and_run(_internal_host_game.bind(server_oid, match_time, public_data))
