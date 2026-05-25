@@ -20,22 +20,17 @@ from slowapi.errors import RateLimitExceeded
 import uvicorn
 
 # ---------- Configuration ----------
-SECRET_KEY = os.getenv("SECRET_KEY", "change-me")          # Global API key
+SECRET_KEY = os.getenv("SECRET_KEY", "change-me")
 HTTP_PORT = int(os.getenv("HTTP_PORT", "8000"))
 MATCH_TIMEOUT_SECONDS = 60
 CLEANUP_INTERVAL_SECONDS = 15
-
-# Rate limiting: allow 30 requests per minute per IP (adjust as needed)
-RATE_LIMIT = "60/minute"
+RATE_LIMIT = "60/minute"   # 60 requests per minute per IP
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("matchmaker")
 
 # ---------- Rate limiter setup ----------
 limiter = Limiter(key_func=get_remote_address)
-app = FastAPI(lifespan=lifespan)
-app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # ---------- State ----------
 rooms: Dict[str, dict] = {}
@@ -89,18 +84,16 @@ async def cleanup_rooms_loop():
         for room_id in to_delete:
             del rooms[room_id]
 
-# ---------- Global API key dependency ----------
+# ---------- FastAPI app ----------
+app = FastAPI(lifespan=lifespan)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+# Global API key dependency
 async def verify_auth(x_api_key: str = Header(..., alias="X-API-Key")):
     if x_api_key != SECRET_KEY:
         raise HTTPException(status_code=401, detail="Invalid API key")
-
-# Optional: make health check public (no key required)
-async def optional_auth(x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
-    # For endpoints that can be optionally protected, but we'll use verify_auth for most.
-    pass
-
-# ---------- FastAPI app ----------
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 # Static dashboard
 static_dir = "static"
@@ -113,7 +106,7 @@ async def root():
     return '<html><head><meta http-equiv="refresh" content="0; url=/dashboard/dashboard.html"></head><body>Redirecting...</body></html>'
 
 @app.get("/health")
-@limiter.limit(RATE_LIMIT)   # still rate limited but no API key required
+@limiter.limit(RATE_LIMIT)
 async def health(request: Request):
     return {"status": "alive"}
 
