@@ -1,4 +1,4 @@
-# matchlay_api.gd – Updated for cleaned Python matchmaker
+# matchlay_api.gd – No more ERR_BUSY, each request uses its own HTTPRequest node
 extends Node
 class_name MatchLayAPI
 
@@ -32,8 +32,7 @@ var _heartbeat_timer: Timer = null
 var _heartbeat_in_flight: bool = false
 var _initialized: bool = false
 
-var _http: HTTPRequest = null
-var _health_http: HTTPRequest = null
+var _health_http: HTTPRequest = null   # only for health checks
 
 # ----------------------------- Public API -----------------------------
 func init(url: String, key: String) -> void:
@@ -43,13 +42,9 @@ func init(url: String, key: String) -> void:
 	server_url = full_url.rstrip("/")
 	api_key = key
 	
-	_http = HTTPRequest.new()
 	_health_http = HTTPRequest.new()
-	add_child(_http)
 	add_child(_health_http)
-	_http.timeout = HTTP_REQUEST_TIMEOUT
 	_health_http.timeout = HEALTH_CHECK_TIMEOUT
-	_http.request_completed.connect(_on_request_completed)
 	_initialized = true
 	print("MatchLayAPI ready at ", server_url)
 
@@ -79,7 +74,14 @@ func leave_room() -> void:
 	_stop_heartbeat()
 	_cleanup_state()
 
-# ----------------------------- Internal actions -----------------------------
+# ----------------------------- Internal actions (each creates its own HTTPRequest) -----------------------------
+func _send_request(url: String, headers: PackedStringArray, method: int, body: String = "") -> void:
+	var req = HTTPRequest.new()
+	add_child(req)
+	req.timeout = HTTP_REQUEST_TIMEOUT
+	req.request_completed.connect(_on_request_completed.bind(req, url, method), CONNECT_ONE_SHOT)
+	req.request(url, headers, method, body)
+
 func _internal_host_game(server_oid: String, match_time: int, public_data: Dictionary) -> void:
 	var body = {
 		"server_oid": server_oid,
@@ -87,21 +89,20 @@ func _internal_host_game(server_oid: String, match_time: int, public_data: Dicti
 		"public_data": public_data
 	}
 	var headers = ["Content-Type: application/json", "X-API-Key: " + api_key]
-	_http.request(server_url + "/host", headers, HTTPClient.METHOD_POST, JSON.stringify(body))
+	_send_request(server_url + "/host", headers, HTTPClient.METHOD_POST, JSON.stringify(body))
 
 func _internal_join_with_secret(secret: String) -> void:
 	var body = {"secret": secret}
 	var headers = ["Content-Type: application/json", "X-API-Key: " + api_key]
-	_http.request(server_url + "/join", headers, HTTPClient.METHOD_POST, JSON.stringify(body))
+	_send_request(server_url + "/join", headers, HTTPClient.METHOD_POST, JSON.stringify(body))
 
 func _internal_join_with_room_id(room_id: String) -> void:
 	var headers = ["X-API-Key: " + api_key]
-	_http.request(server_url + "/join/" + room_id, headers, HTTPClient.METHOD_POST)
+	_send_request(server_url + "/join/" + room_id, headers, HTTPClient.METHOD_POST)
 
 func _internal_list_rooms() -> void:
-	# No API key needed for public /rooms endpoint
-	var headers = ["Content-Type: application/json"]
-	_http.request(server_url + "/rooms", headers, HTTPClient.METHOD_GET)
+	# Public endpoint – no API key needed
+	_send_request(server_url + "/rooms", ["Content-Type: application/json"], HTTPClient.METHOD_GET)
 
 func _internal_add_player(player_oid: String) -> void:
 	if not is_host or host_key.is_empty():
@@ -113,7 +114,7 @@ func _internal_add_player(player_oid: String) -> void:
 		"X-API-Key: " + api_key,
 		"X-Host-Key: " + host_key
 	]
-	_http.request(server_url + "/room/%s/player" % current_room_id, headers, HTTPClient.METHOD_POST, JSON.stringify(body))
+	_send_request(server_url + "/room/%s/player" % current_room_id, headers, HTTPClient.METHOD_POST, JSON.stringify(body))
 
 func _internal_remove_player(player_oid: String) -> void:
 	if not is_host or host_key.is_empty():
@@ -125,7 +126,7 @@ func _internal_remove_player(player_oid: String) -> void:
 		"X-API-Key: " + api_key,
 		"X-Host-Key: " + host_key
 	]
-	_http.request(server_url + "/room/%s/player" % current_room_id, headers, HTTPClient.METHOD_DELETE, JSON.stringify(body))
+	_send_request(server_url + "/room/%s/player" % current_room_id, headers, HTTPClient.METHOD_DELETE, JSON.stringify(body))
 
 func _internal_close_room() -> void:
 	if not is_host or host_key.is_empty():
@@ -135,7 +136,7 @@ func _internal_close_room() -> void:
 		"X-API-Key: " + api_key,
 		"X-Host-Key: " + host_key
 	]
-	_http.request(server_url + "/room/%s" % current_room_id, headers, HTTPClient.METHOD_DELETE)
+	_send_request(server_url + "/room/%s" % current_room_id, headers, HTTPClient.METHOD_DELETE)
 
 # ----------------------------- Health check -----------------------------
 func _check_health_and_run(action: Callable) -> void:
@@ -152,7 +153,7 @@ func _on_health_check_completed(result: int, response_code: int, _headers: Packe
 		return
 	action.call()
 
-# ----------------------------- Heartbeat -----------------------------
+# ----------------------------- Heartbeat (creates its own HTTPRequest) -----------------------------
 func _start_heartbeat() -> void:
 	if _heartbeat_timer:
 		_heartbeat_timer.stop()
@@ -182,7 +183,7 @@ func _send_heartbeat() -> void:
 	var req = HTTPRequest.new()
 	add_child(req)
 	req.timeout = HTTP_REQUEST_TIMEOUT
-	req.request_completed.connect(_on_heartbeat_completed.bind(req))
+	req.request_completed.connect(_on_heartbeat_completed.bind(req), CONNECT_ONE_SHOT)
 	req.request(server_url + "/heartbeat", headers, HTTPClient.METHOD_POST, JSON.stringify(body))
 
 func _on_heartbeat_completed(result: int, response_code: int, _headers: PackedStringArray, _body: PackedByteArray, req: HTTPRequest) -> void:
@@ -196,8 +197,9 @@ func _on_heartbeat_completed(result: int, response_code: int, _headers: PackedSt
 	else:
 		heartbeat_ok.emit()
 
-# ----------------------------- Response handler -----------------------------
-func _on_request_completed(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
+# ----------------------------- Response handler (works with temporary nodes) -----------------------------
+func _on_request_completed(result: int, response_code: int, headers: PackedStringArray, body: PackedByteArray, req: HTTPRequest, url: String, method: int) -> void:
+	req.queue_free()
 	var json = JSON.parse_string(body.get_string_from_utf8())
 	
 	if result != HTTPRequest.RESULT_SUCCESS:
@@ -211,6 +213,7 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 			leave_room()
 		return
 	
+	# Handle successful responses
 	if json.has("rooms"):
 		var typed_rooms: Array[MatchLayRoomData] = []
 		for r in json.rooms:
@@ -238,7 +241,7 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 	elif json.has("status") and json.get("status") == "ok":
 		if json.has("player_count"):
 			player_count_updated.emit(current_room_id, json.player_count)
-	elif response_code == 200 and _http.get_method() == HTTPClient.METHOD_DELETE and str(_http.get_path()).find("/room/") != -1:
+	elif response_code == 200 and method == HTTPClient.METHOD_DELETE and "/room/" in url:
 		room_closed.emit()
 		leave_room()
 
