@@ -10,12 +10,13 @@ extends Node
 @export var line : LineEdit
 
 # State
-var noray_connected = false
-var my_room_id = ""
-var my_room_secret = ""
+var noray_connected : bool = false
+var my_room_id : String = ""
+var my_room_secret : String = ""
 var my_room_data : Dictionary
-var is_host = false
-var player_count := 0
+var is_host : bool = false
+var player_count : int = 0
+var is_private : bool = false
 var matchmaker : MatchLayAPI = null
 
 var my_oid : String
@@ -76,7 +77,7 @@ func host_game():
 		level = "desert",
 		type ="deathmatch"
 	}
-	matchmaker.host_game(my_oid,0,my_room_data)
+	matchmaker.host_game(my_oid,0,my_room_data,true)
 	await matchmaker.room_hosted
 	matchmaker.add_player(my_oid)
 	
@@ -185,9 +186,10 @@ func _on_room_joined(room_id: String, server_oid: String, _player_count: int) ->
 	pass
 
 
-func _on_room_hosted(room_id: String, secret: String, _host_key: String) -> void :
+func _on_room_hosted(room_id: String, secret: String, _host_key: String,_is_private: bool) -> void :
 	my_room_id = room_id
 	my_room_secret = secret
+	is_private = _is_private
 	pass
 
 func _on_rooms_listed(rooms: Array[MatchLayRoomData]) -> void : 
