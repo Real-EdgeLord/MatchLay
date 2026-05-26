@@ -3,7 +3,7 @@ extends Node
 class_name MatchLayAPI
 
 # ----------------------------- Signals ---------------------------------
-signal rooms_listed(rooms: Array)
+signal rooms_listed(rooms: Array[MatchLayRoomData])
 signal room_hosted(room_id: String, secret: String, host_key: String)
 signal room_joined(room_id: String, server_oid: String, player_count: int)
 signal player_count_updated(room_id: String, player_count: int)
@@ -212,7 +212,15 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 		return
 	
 	if json.has("rooms"):
-		rooms_listed.emit(json.rooms)
+		var typed_rooms: Array[MatchLayRoomData] = []
+		for r in json.rooms:
+			typed_rooms.append(MatchLayRoomData.new(
+				r.get("room_id", ""),
+				r.get("public_data", {}),
+				r.get("player_count", 0),
+				r.get("age_seconds", 0)
+			))
+		rooms_listed.emit(typed_rooms)
 	elif json.has("room_id") and json.has("host_key") and json.has("secret"):
 		is_host = true
 		host_key = json.host_key
