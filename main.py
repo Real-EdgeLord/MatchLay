@@ -109,7 +109,6 @@ async def root():
 async def health(request: Request):
     return {"status": "alive"}
 
-# ---------- Public endpoints ----------
 @app.get("/rooms")
 @limiter.limit(RATE_LIMIT)
 async def list_rooms(request: Request):   # No API key required
@@ -121,7 +120,7 @@ async def list_rooms(request: Request):   # No API key required
                 "room_id": room_id,
                 "public_data": room["public_data"],
                 "player_count": len(room["players"]),
-                "match_time": room["match_time"],
+                "age_seconds": int(now - room["created_at"]),   # time since hosted
             })
     return {"rooms": result}
 

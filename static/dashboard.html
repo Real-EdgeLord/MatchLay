@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Matchmaker Dashboard</title>
+    <title>MatchLay Dashboard</title>
     <meta charset="utf-8">
     <style>
         body { font-family: monospace; margin: 2em; background: #111; color: #eee; }
@@ -22,7 +22,7 @@
     <div class="timestamp" id="timestamp"></div>
     <table id="roomsTable">
         <thead>
-            <tr><th>Room ID</th><th>Public Data</th><th>Players</th><th>Match Time (s)</th></tr>
+            <tr><th>Room ID</th><th>Public Data</th><th>Players</th><th>Age (s)</th></tr>
         </thead>
         <tbody></tbody>
     </table>
@@ -38,7 +38,7 @@
                     row.insertCell(0).textContent = room.room_id;
                     row.insertCell(1).textContent = JSON.stringify(room.public_data);
                     row.insertCell(2).textContent = room.player_count;
-                    row.insertCell(3).textContent = room.match_time !== null ? room.match_time : '—';
+                    row.insertCell(3).textContent = room.age_seconds;
                 }
                 document.getElementById('timestamp').textContent = 'Last update: ' + new Date().toLocaleTimeString();
             } catch (err) {
