@@ -1,10 +1,10 @@
-# matchlay_api.gd – No more ERR_BUSY, each request uses its own HTTPRequest node
+# matchlay_api.gd – Supports public/private rooms
 extends Node
 class_name MatchLayAPI
 
 # ----------------------------- Signals ---------------------------------
 signal rooms_listed(rooms: Array[MatchLayRoomData])
-signal room_hosted(room_id: String, secret: String, host_key: String)
+signal room_hosted(room_id: String, secret: String, host_key: String, is_private: bool)
 signal room_joined(room_id: String, server_oid: String, player_count: int)
 signal player_count_updated(room_id: String, player_count: int)
 signal heartbeat_ok()
@@ -48,9 +48,9 @@ func init(url: String, key: String) -> void:
 	_initialized = true
 	print("MatchLayAPI ready at ", server_url)
 
-func host_game(server_oid: String, match_time: int = 0, public_data: Dictionary = {}) -> void:
+func host_game(server_oid: String, match_time: int = 0, public_data: Dictionary = {}, is_private: bool = true) -> void:
 	_pending_server_oid = server_oid
-	_check_health_and_run(_internal_host_game.bind(server_oid, match_time, public_data))
+	_check_health_and_run(_internal_host_game.bind(server_oid, match_time, public_data, is_private))
 
 func join_with_secret(secret: String) -> void:
 	_check_health_and_run(_internal_join_with_secret.bind(secret))
@@ -74,7 +74,7 @@ func leave_room() -> void:
 	_stop_heartbeat()
 	_cleanup_state()
 
-# ----------------------------- Internal actions (each creates its own HTTPRequest) -----------------------------
+# ----------------------------- Internal actions -----------------------------
 func _send_request(url: String, headers: PackedStringArray, method: int, body: String = "") -> void:
 	var req = HTTPRequest.new()
 	add_child(req)
@@ -82,11 +82,12 @@ func _send_request(url: String, headers: PackedStringArray, method: int, body: S
 	req.request_completed.connect(_on_request_completed.bind(req, url, method), CONNECT_ONE_SHOT)
 	req.request(url, headers, method, body)
 
-func _internal_host_game(server_oid: String, match_time: int, public_data: Dictionary) -> void:
+func _internal_host_game(server_oid: String, match_time: int, public_data: Dictionary, is_private: bool) -> void:
 	var body = {
 		"server_oid": server_oid,
 		"match_time": match_time if match_time > 0 else null,
-		"public_data": public_data
+		"public_data": public_data,
+		"is_private": is_private
 	}
 	var headers = ["Content-Type: application/json", "X-API-Key: " + api_key]
 	_send_request(server_url + "/host", headers, HTTPClient.METHOD_POST, JSON.stringify(body))
@@ -101,7 +102,6 @@ func _internal_join_with_room_id(room_id: String) -> void:
 	_send_request(server_url + "/join/" + room_id, headers, HTTPClient.METHOD_POST)
 
 func _internal_list_rooms() -> void:
-	# Public endpoint – no API key needed
 	_send_request(server_url + "/rooms", ["Content-Type: application/json"], HTTPClient.METHOD_GET)
 
 func _internal_add_player(player_oid: String) -> void:
@@ -153,7 +153,7 @@ func _on_health_check_completed(result: int, response_code: int, _headers: Packe
 		return
 	action.call()
 
-# ----------------------------- Heartbeat (creates its own HTTPRequest) -----------------------------
+# ----------------------------- Heartbeat -----------------------------
 func _start_heartbeat() -> void:
 	if _heartbeat_timer:
 		_heartbeat_timer.stop()
@@ -197,7 +197,7 @@ func _on_heartbeat_completed(result: int, response_code: int, _headers: PackedSt
 	else:
 		heartbeat_ok.emit()
 
-# ----------------------------- Response handler (works with temporary nodes) -----------------------------
+# ----------------------------- Response handler -----------------------------
 func _on_request_completed(result: int, response_code: int, headers: PackedStringArray, body: PackedByteArray, req: HTTPRequest, url: String, method: int) -> void:
 	req.queue_free()
 	var json = JSON.parse_string(body.get_string_from_utf8())
@@ -221,26 +221,35 @@ func _on_request_completed(result: int, response_code: int, headers: PackedStrin
 				r.get("room_id", ""),
 				r.get("public_data", {}),
 				r.get("player_count", 0),
-				r.get("age_seconds", 0)
+				r.get("age_seconds", 0),
+				r.get("is_private", true)   # add is_private to room data
 			))
 		rooms_listed.emit(typed_rooms)
-	elif json.has("room_id") and json.has("host_key") and json.has("secret"):
+	
+	elif json.has("room_id") and json.has("host_key"):
+		# Host response (secret may be null)
+		var secret_val = json.get("secret")  # can be null
+		var is_private_val = json.get("is_private", true)
 		is_host = true
 		host_key = json.host_key
-		room_secret = json.secret
+		room_secret = secret_val if secret_val != null else ""
 		current_room_id = json.room_id
 		_start_heartbeat()
-		room_hosted.emit(json.room_id, json.secret, json.host_key)
+		room_hosted.emit(json.room_id, room_secret, host_key, is_private_val)
 		call_deferred("_auto_add_host_player")
+	
 	elif json.has("room_id") and json.has("server_oid"):
+		# Join response (both secret and room_id endpoints)
 		is_host = false
 		host_key = ""
 		room_secret = ""
 		current_room_id = json.room_id
 		room_joined.emit(json.room_id, json.server_oid, json.get("player_count", 0))
+	
 	elif json.has("status") and json.get("status") == "ok":
 		if json.has("player_count"):
 			player_count_updated.emit(current_room_id, json.player_count)
+	
 	elif response_code == 200 and method == HTTPClient.METHOD_DELETE and "/room/" in url:
 		room_closed.emit()
 		leave_room()

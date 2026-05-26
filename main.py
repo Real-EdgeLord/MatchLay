@@ -1,4 +1,4 @@
-# main.py – Matchmaker with public /rooms for dashboard
+# main.py – Matchmaker with public/private rooms
 import asyncio
 import uuid
 import time
@@ -40,6 +40,7 @@ class HostRequest(BaseModel):
     server_oid: str
     match_time: Optional[int] = None
     public_data: Optional[dict] = None
+    is_private: bool = True   # True = require secret, False = public (join by room_id)
 
 class JoinBySecretRequest(BaseModel):
     secret: str
@@ -111,7 +112,7 @@ async def health(request: Request):
 
 @app.get("/rooms")
 @limiter.limit(RATE_LIMIT)
-async def list_rooms(request: Request):   # No API key required
+async def list_rooms(request: Request):
     now = time.time()
     result = []
     for room_id, room in rooms.items():
@@ -120,17 +121,20 @@ async def list_rooms(request: Request):   # No API key required
                 "room_id": room_id,
                 "public_data": room["public_data"],
                 "player_count": len(room["players"]),
-                "age_seconds": int(now - room["created_at"]),   # time since hosted
+                "age_seconds": int(now - room["created_at"]),
+                "is_private": room["is_private"],   # show lock icon in dashboard
             })
     return {"rooms": result}
 
-# ---------- Protected endpoints (require X-API-Key) ----------
+# ---------- Protected endpoints ----------
 @app.post("/host")
 @limiter.limit(RATE_LIMIT)
 async def host_game(request: Request, req: HostRequest, auth=Depends(verify_auth)):
     room_id = str(uuid.uuid4())[:8]
     host_key = str(uuid.uuid4())[:16]
-    secret = generate_room_secret()
+    secret = None
+    if req.is_private:
+        secret = generate_room_secret()
     rooms[room_id] = {
         "room_id": room_id,
         "secret": secret,
@@ -141,12 +145,14 @@ async def host_game(request: Request, req: HostRequest, auth=Depends(verify_auth
         "created_at": time.time(),
         "last_heartbeat": time.time(),
         "players": [],
+        "is_private": req.is_private,
     }
-    logger.info(f"Room {room_id} created | secret={secret} | host_key={host_key[:4]}...")
+    logger.info(f"Room {room_id} created | private={req.is_private} | secret={secret}")
     return {
         "room_id": room_id,
-        "secret": secret,
+        "secret": secret,          # may be null if public
         "host_key": host_key,
+        "is_private": req.is_private,
     }
 
 @app.post("/join")
@@ -154,13 +160,17 @@ async def host_game(request: Request, req: HostRequest, auth=Depends(verify_auth
 async def join_by_secret(request: Request, req: JoinBySecretRequest, auth=Depends(verify_auth)):
     found_room = None
     for room in rooms.values():
-        if room["secret"] == req.secret:
+        if room.get("secret") == req.secret:
             found_room = room
             break
     if not found_room:
         raise HTTPException(status_code=404, detail="Invalid room secret")
     if time.time() - found_room["last_heartbeat"] >= MATCH_TIMEOUT_SECONDS:
         raise HTTPException(status_code=410, detail="Room expired")
+    # If room is public, it wouldn't have a secret – but if someone somehow got a secret, still allow? Better to check: private required
+    if not found_room.get("is_private", True):
+        # Public rooms have no secret, but we still allow if secret matches None? That's impossible. Reject.
+        raise HTTPException(status_code=403, detail="This room is public; join by room ID instead")
     return {
         "room_id": found_room["room_id"],
         "server_oid": found_room["server_oid"],
@@ -175,6 +185,8 @@ async def join_by_room_id(request: Request, room_id: str, auth=Depends(verify_au
     room = rooms[room_id]
     if time.time() - room["last_heartbeat"] >= MATCH_TIMEOUT_SECONDS:
         raise HTTPException(status_code=410, detail="Room expired")
+    if room.get("is_private", True):
+        raise HTTPException(status_code=403, detail="This room is private; join by secret instead")
     return {
         "room_id": room_id,
         "server_oid": room["server_oid"],

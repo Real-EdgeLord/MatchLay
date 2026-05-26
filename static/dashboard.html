@@ -22,7 +22,7 @@
     <div class="timestamp" id="timestamp"></div>
     <table id="roomsTable">
         <thead>
-            <tr><th>Room ID</th><th>Public Data</th><th>Players</th><th>Age (s)</th></tr>
+            <tr><th>Room ID</th><th>Public Data</th><th>Players</th><th>Privacy</th><th>Age (s)</th></tr>
         </thead>
         <tbody></tbody>
     </table>
@@ -38,7 +38,9 @@
                     row.insertCell(0).textContent = room.room_id;
                     row.insertCell(1).textContent = JSON.stringify(room.public_data);
                     row.insertCell(2).textContent = room.player_count;
-                    row.insertCell(3).textContent = room.age_seconds;
+                    const isPrivate = room.is_private === true;
+                    row.insertCell(3).textContent = isPrivate ? '🔒 Private' : '🌐 Public';
+                    row.insertCell(4).textContent = room.age_seconds;
                 }
                 document.getElementById('timestamp').textContent = 'Last update: ' + new Date().toLocaleTimeString();
             } catch (err) {

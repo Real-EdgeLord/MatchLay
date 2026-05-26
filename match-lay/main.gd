@@ -192,4 +192,4 @@ func _on_room_hosted(room_id: String, secret: String, _host_key: String) -> void
 
 func _on_rooms_listed(rooms: Array[MatchLayRoomData]) -> void : 
 	for room in rooms:
-		print("Room %s has %d players, age %d seconds, data: %s" % [room.room_id, room.player_count, room.age_seconds, room.public_data])
+		print("Room %s has %d players, age %d seconds, data: %s, privacy = %s" % [room.room_id, room.player_count, room.age_seconds, room.public_data, room.is_private])
