@@ -48,9 +48,9 @@ func init(url: String, key: String) -> void:
 	_initialized = true
 	print("MatchLayAPI ready at ", server_url)
 
-func host_game(server_oid: String, match_time: int = 0, public_data: Dictionary = {}, is_private: bool = true) -> void:
+func host_game(server_oid: String, public_data: Dictionary = {}, is_private: bool = true) -> void:
 	_pending_server_oid = server_oid
-	_check_health_and_run(_internal_host_game.bind(server_oid, match_time, public_data, is_private))
+	_check_health_and_run(_internal_host_game.bind(server_oid, public_data, is_private))
 
 func join_with_secret(secret: String) -> void:
 	_check_health_and_run(_internal_join_with_secret.bind(secret))
@@ -82,10 +82,10 @@ func _send_request(url: String, headers: PackedStringArray, method: int, body: S
 	req.request_completed.connect(_on_request_completed.bind(req, url, method), CONNECT_ONE_SHOT)
 	req.request(url, headers, method, body)
 
-func _internal_host_game(server_oid: String, match_time: int, public_data: Dictionary, is_private: bool) -> void:
+func _internal_host_game(server_oid: String, public_data: Dictionary, is_private: bool) -> void:
 	var body = {
 		"server_oid": server_oid,
-		"match_time": match_time if match_time > 0 else null,
+		"match_time": 0,
 		"public_data": public_data,
 		"is_private": is_private
 	}

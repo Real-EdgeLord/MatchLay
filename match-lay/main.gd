@@ -77,7 +77,7 @@ func host_game():
 		level = "desert",
 		type ="deathmatch"
 	}
-	matchmaker.host_game(my_oid,0,my_room_data,true)
+	matchmaker.host_game(my_oid,my_room_data,true)
 	await matchmaker.room_hosted
 	matchmaker.add_player(my_oid)
 	
