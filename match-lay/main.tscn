@@ -35,7 +35,12 @@ layout_mode = 2
 
 [node name="Host" type="Button" parent="Panel/VBoxContainer/HBoxContainer" unique_id=1517452669]
 layout_mode = 2
-text = "Host"
+text = "Host public"
+
+[node name="HostPrivate" type="Button" parent="Panel/VBoxContainer/HBoxContainer" unique_id=356114725]
+layout_mode = 2
+text = "Host private
+"
 
 [node name="Close" type="Button" parent="Panel/VBoxContainer/HBoxContainer" unique_id=1710076762]
 layout_mode = 2
@@ -49,6 +54,10 @@ text = "GetRooms
 [node name="Join" type="Button" parent="Panel/VBoxContainer/HBoxContainer" unique_id=149680098]
 layout_mode = 2
 text = "Join First"
+
+[node name="Joinpublic" type="Button" parent="Panel/VBoxContainer/HBoxContainer" unique_id=1990121598]
+layout_mode = 2
+text = "Join public"
 
 [node name="firerpc" type="Button" parent="Panel/VBoxContainer/HBoxContainer" unique_id=1862458106]
 layout_mode = 2
@@ -72,3 +81,6 @@ offset_left = 48.0
 offset_top = 51.0
 offset_right = 421.0
 offset_bottom = 82.0
+
+[connection signal="button_down" from="Panel/VBoxContainer/HBoxContainer/HostPrivate" to="." method="_on_host_private_button_down"]
+[connection signal="button_down" from="Panel/VBoxContainer/HBoxContainer/Joinpublic" to="." method="_on_joinpublic_button_down"]

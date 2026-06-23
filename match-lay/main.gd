@@ -56,6 +56,43 @@ func _ready():
 	matchmaker.room_hosted.connect(_on_room_hosted)
 	matchmaker.rooms_listed.connect(_on_rooms_listed)
 	
+func _on_host_private_button_down() -> void:
+		# 1. Register as a host with the noray server
+	Noray.register_host()
+	
+	# 2. Wait for the server to assign you a Private ID
+	await Noray.on_pid
+	
+	# 3. Register your local port with the remote address
+	var err = await Noray.register_remote()
+	if err != OK:
+		print("Failed to register remote address: ", error_string(err))
+		return
+	my_oid = Noray.oid
+	
+	# 4. Create the room on match lay
+	my_room_data ={
+		level = "desert",
+		type ="deathmatch"
+	}
+	matchmaker.host_game(my_oid,my_room_data,true)
+	await matchmaker.room_hosted
+	matchmaker.add_player(my_oid)
+	
+	# 5. Now Noray.local_port is valid — use it to start the server
+	print("Registered local port: ", Noray.local_port)
+	var peer = ENetMultiplayerPeer.new()
+	err = peer.create_server(Noray.local_port)
+	if err != OK:
+		print("Failed to create server on port ", Noray.local_port, ": ", error_string(err))
+		return
+	
+	multiplayer.multiplayer_peer = peer
+	print("Server listening on port ", Noray.local_port)
+	print("Share this Open ID with your friend: ", Noray.oid)
+	status_label.text = my_room_secret
+	is_host = true
+
 
 # ===== BUTTON ACTIONS =====
 func host_game():
@@ -77,7 +114,7 @@ func host_game():
 		level = "desert",
 		type ="deathmatch"
 	}
-	matchmaker.host_game(my_oid,my_room_data,true)
+	matchmaker.host_game(my_oid,my_room_data,false)
 	await matchmaker.room_hosted
 	matchmaker.add_player(my_oid)
 	
@@ -116,6 +153,32 @@ func _on_JoinButton_pressed():
 
 	# Wait for the NAT connection signal
 	Noray.on_connect_nat.connect(_on_nat_connected)
+
+
+
+
+func _on_joinpublic_button_down() -> void:
+	# Step 1: Join a room by secret code to get server oid
+	matchmaker.join_with_room_id(line.text)
+	await matchmaker.room_joined
+	# Step 2: Register as host
+	Noray.register_host()
+	await Noray.on_pid          # Wait for Private ID
+	print("Got PID: ", Noray.pid)
+
+	# Step 3: Register local port with Noray server (critical!)
+	var err = await Noray.register_remote()
+	if err != OK:
+		print("Failed to register remote address: ", error_string(err))
+		return
+	print("Registered remote address. Local port: ", Noray.local_port)
+	# Connect using NAT punchthrough
+	
+	Noray.connect_nat(room_oid)
+
+	# Wait for the NAT connection signal
+	Noray.on_connect_nat.connect(_on_nat_connected)
+
 
 func _on_nat_connected(address: String, port: int):
 	# Create an ENet client and connect to the host's address/port

@@ -14,7 +14,7 @@ signal room_expired(room_id: String)
 signal server_down()
 
 # ----------------------------- Configuration -----------------------------
-const HEARTBEAT_INTERVAL: float = 30.0
+const HEARTBEAT_INTERVAL: float = 10.0
 const HTTP_REQUEST_TIMEOUT: int = 15
 const HEALTH_CHECK_TIMEOUT: int = 5
 
@@ -43,6 +43,7 @@ func init(url: String, key: String) -> void:
 	api_key = key
 	
 	_health_http = HTTPRequest.new()
+	_health_http.name = "HealthHttp"
 	add_child(_health_http)
 	_health_http.timeout = HEALTH_CHECK_TIMEOUT
 	_initialized = true
@@ -51,6 +52,7 @@ func init(url: String, key: String) -> void:
 func host_game(server_oid: String, public_data: Dictionary = {}, is_private: bool = true) -> void:
 	_pending_server_oid = server_oid
 	_check_health_and_run(_internal_host_game.bind(server_oid, public_data, is_private))
+	#_start_heartbeat()
 
 func join_with_secret(secret: String) -> void:
 	_check_health_and_run(_internal_join_with_secret.bind(secret))
@@ -159,6 +161,7 @@ func _start_heartbeat() -> void:
 		_heartbeat_timer.stop()
 	else:
 		_heartbeat_timer = Timer.new()
+		_heartbeat_timer.name = "heartBeat"
 		add_child(_heartbeat_timer)
 	_heartbeat_timer.wait_time = HEARTBEAT_INTERVAL
 	_heartbeat_timer.one_shot = false
@@ -179,8 +182,10 @@ func _send_heartbeat() -> void:
 		return
 	_heartbeat_in_flight = true
 	var body = {"room_id": current_room_id}
-	var headers = ["Content-Type: application/json", "X-Host-Key: " + host_key]
+	var headers = ["Content-Type: application/json", "X-API-Key: " + api_key, "X-Host-Key: " + host_key]
+	#var headers = ["Content-Type: application/json", "X-Host-Key: " + host_key]
 	var req = HTTPRequest.new()
+	req.name = "hearBeatHTTPs"
 	add_child(req)
 	req.timeout = HTTP_REQUEST_TIMEOUT
 	req.request_completed.connect(_on_heartbeat_completed.bind(req), CONNECT_ONE_SHOT)
