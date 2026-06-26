@@ -294,3 +294,31 @@ func _cleanup_state() -> void:
 	host_key = ""
 	room_secret = ""
 	_pending_server_oid = ""
+
+
+func shutdown() -> void:
+	# Stop heartbeat and reset room state (reuse existing logic)
+	_cleanup_state()
+	
+	# Cancel health‑check request and disconnect signal
+	if _health_http:
+		if _health_http.get_http_client_status() != HTTPClient.STATUS_DISCONNECTED:
+			_health_http.cancel_request()
+		if _health_http.request_completed.is_connected(_on_health_check_completed):
+			_health_http.request_completed.disconnect(_on_health_check_completed)
+	
+	# Cancel any other in‑flight HTTP requests (from _send_request and heartbeat)
+	for child in get_children():
+		if child is HTTPRequest:
+			if child.get_http_client_status() != HTTPClient.STATUS_DISCONNECTED:
+				child.cancel_request()
+			child.queue_free()
+	
+	# Clear pending action queue (not done by _cleanup_state)
+	_pending_actions.clear()
+	_health_check_in_progress = false
+	
+	# Prevent further API calls (not done by _cleanup_state)
+	_initialized = false
+	
+	print("MatchLayAPI fully shut down")
