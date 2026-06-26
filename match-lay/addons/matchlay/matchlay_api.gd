@@ -34,6 +34,9 @@ var _initialized: bool = false
 
 var _health_http: HTTPRequest = null   # only for health checks
 
+var _pending_actions: Array[Callable] = []
+var _health_check_in_progress: bool = false
+
 # ----------------------------- Public API -----------------------------
 func init(url: String, key: String) -> void:
 	var full_url = url.strip_edges()
@@ -43,7 +46,7 @@ func init(url: String, key: String) -> void:
 	api_key = key
 	
 	_health_http = HTTPRequest.new()
-	_health_http.name = "HealthHttp"
+	_health_http.name = "health_http"
 	add_child(_health_http)
 	_health_http.timeout = HEALTH_CHECK_TIMEOUT
 	_initialized = true
@@ -52,7 +55,6 @@ func init(url: String, key: String) -> void:
 func host_game(server_oid: String, public_data: Dictionary = {}, is_private: bool = true) -> void:
 	_pending_server_oid = server_oid
 	_check_health_and_run(_internal_host_game.bind(server_oid, public_data, is_private))
-	#_start_heartbeat()
 
 func join_with_secret(secret: String) -> void:
 	_check_health_and_run(_internal_join_with_secret.bind(secret))
@@ -79,6 +81,7 @@ func leave_room() -> void:
 # ----------------------------- Internal actions -----------------------------
 func _send_request(url: String, headers: PackedStringArray, method: int, body: String = "") -> void:
 	var req = HTTPRequest.new()
+	req.name = "http_request"
 	add_child(req)
 	req.timeout = HTTP_REQUEST_TIMEOUT
 	req.request_completed.connect(_on_request_completed.bind(req, url, method), CONNECT_ONE_SHOT)
@@ -145,15 +148,35 @@ func _check_health_and_run(action: Callable) -> void:
 	if not _initialized or server_url.is_empty():
 		error_occurred.emit(500, "MatchLayAPI not initialized. Call init() first.")
 		return
-	_health_http.request_completed.connect(_on_health_check_completed.bind(action), CONNECT_ONE_SHOT)
+	_pending_actions.append(action)
+	if not _health_check_in_progress:
+		_start_health_check()
+
+func _start_health_check() -> void:
+	if _health_check_in_progress:
+		return
+	# Cancel any lingering request
+	if _health_http.get_http_client_status() != HTTPClient.STATUS_DISCONNECTED:
+		_health_http.cancel_request()
+	# Avoid duplicate connections
+	if _health_http.request_completed.is_connected(_on_health_check_completed):
+		_health_http.request_completed.disconnect(_on_health_check_completed)
+	_health_http.request_completed.connect(_on_health_check_completed, CONNECT_ONE_SHOT)
+	_health_check_in_progress = true
 	_health_http.request(server_url + "/health", ["Content-Type: application/json"], HTTPClient.METHOD_GET)
 
-func _on_health_check_completed(result: int, response_code: int, _headers: PackedStringArray, _body: PackedByteArray, action: Callable) -> void:
+func _on_health_check_completed(result: int, response_code: int, _headers: PackedStringArray, _body: PackedByteArray) -> void:
+	_health_check_in_progress = false
 	if result != HTTPRequest.RESULT_SUCCESS or response_code != 200:
 		server_down.emit()
 		_cleanup_state()
+		_pending_actions.clear()   # no point retrying if server is down
 		return
-	action.call()
+	# Execute all queued actions
+	var actions = _pending_actions.duplicate()
+	_pending_actions.clear()
+	for action in actions:
+		action.call()
 
 # ----------------------------- Heartbeat -----------------------------
 func _start_heartbeat() -> void:
@@ -161,7 +184,7 @@ func _start_heartbeat() -> void:
 		_heartbeat_timer.stop()
 	else:
 		_heartbeat_timer = Timer.new()
-		_heartbeat_timer.name = "heartBeat"
+		_heartbeat_timer.name = "HeartBeatTimer"
 		add_child(_heartbeat_timer)
 	_heartbeat_timer.wait_time = HEARTBEAT_INTERVAL
 	_heartbeat_timer.one_shot = false
@@ -183,9 +206,8 @@ func _send_heartbeat() -> void:
 	_heartbeat_in_flight = true
 	var body = {"room_id": current_room_id}
 	var headers = ["Content-Type: application/json", "X-API-Key: " + api_key, "X-Host-Key: " + host_key]
-	#var headers = ["Content-Type: application/json", "X-Host-Key: " + host_key]
 	var req = HTTPRequest.new()
-	req.name = "hearBeatHTTPs"
+	req.name = "http_heartbeat"
 	add_child(req)
 	req.timeout = HTTP_REQUEST_TIMEOUT
 	req.request_completed.connect(_on_heartbeat_completed.bind(req), CONNECT_ONE_SHOT)
