@@ -25,9 +25,10 @@ HTTP_PORT = int(os.getenv("HTTP_PORT", "8000"))
 MATCH_TIMEOUT_SECONDS = 60
 CLEANUP_INTERVAL_SECONDS = 15
 RATE_LIMIT = "60/minute"
+PUBLIC_ROOM_SECRET = "AAAAAA"  
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("matchmaker")
+logger = logging.getLogger("matchlay")
 
 # ---------- Rate limiter setup ----------
 limiter = Limiter(key_func=get_remote_address)
@@ -54,10 +55,15 @@ class RemovePlayerRequest(BaseModel):
 class HeartbeatRequest(BaseModel):
     room_id: str
 
+class SetVisibilityRequest(BaseModel):
+    is_private: bool
+
 # ---------- Helper ----------
 def generate_room_secret() -> str:
     while True:
         secret = ''.join(random.choices(string.ascii_uppercase, k=6))
+        if secret == PUBLIC_ROOM_SECRET:
+            continue
         if not any(room.get("secret") == secret for room in rooms.values()):
             return secret
 
@@ -132,9 +138,7 @@ async def list_rooms(request: Request):
 async def host_game(request: Request, req: HostRequest, auth=Depends(verify_auth)):
     room_id = str(uuid.uuid4())[:8]
     host_key = str(uuid.uuid4())[:16]
-    secret = None
-    if req.is_private:
-        secret = generate_room_secret()
+    secret = generate_room_secret() if req.is_private else PUBLIC_ROOM_SECRET
     rooms[room_id] = {
         "room_id": room_id,
         "secret": secret,
@@ -230,6 +234,56 @@ async def remove_player(
         room["players"].remove(req.player_oid)
         logger.info(f"Player {req.player_oid} left room {room_id} (count={len(room['players'])})")
     return {"status": "ok", "player_count": len(room["players"])}
+
+
+
+@app.post("/room/{room_id}/visibility")
+@limiter.limit(RATE_LIMIT)
+async def set_visibility(
+    request: Request,
+    room_id: str,
+    req: SetVisibilityRequest,
+    x_host_key: str = Header(..., alias="X-Host-Key"),
+    auth=Depends(verify_auth),
+):
+    if room_id not in rooms:
+        raise HTTPException(status_code=404, detail="Room not found")
+    room = rooms[room_id]
+    if room["host_key"] != x_host_key:
+        raise HTTPException(status_code=403, detail="Invalid host key")
+
+    # No-op if already in the requested state
+    if room["is_private"] == req.is_private:
+        return {
+            "status": "ok",
+            "action": "visibility",
+            "is_private": room["is_private"],
+            "secret": room["secret"],
+        }
+
+    if req.is_private:
+        # public -> private: fresh secret so old invite codes are dead
+        room["is_private"] = True
+        room["secret"] = generate_room_secret()
+    else:
+        # private -> public: drop the real secret, use placeholder
+        room["is_private"] = False
+        room["secret"] = PUBLIC_ROOM_SECRET
+
+    room["last_heartbeat"] = time.time()
+    logger.info(
+        f"Room {room_id} visibility changed | private={room['is_private']} | secret={room['secret']}"
+    )
+
+    return {
+        "status": "ok",
+        "action": "visibility",
+        "is_private": room["is_private"],
+        "secret": room["secret"],
+    }
+
+
+
 
 @app.post("/heartbeat")
 @limiter.limit(RATE_LIMIT)

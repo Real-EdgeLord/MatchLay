@@ -3,15 +3,18 @@ extends Node
 class_name MatchLayAPI
 
 # ----------------------------- Signals ---------------------------------
+signal server_available()   # emitted when health check succeeds
 signal rooms_listed(rooms: Array[MatchLayRoomData])
 signal room_hosted(room_id: String, secret: String, host_key: String, is_private: bool)
 signal room_joined(room_id: String, server_oid: String, player_count: int)
 signal player_count_updated(room_id: String, player_count: int)
+signal room_visibility_changed(is_private: bool, secret: String)
 signal heartbeat_ok()
 signal room_closed()
 signal error_occurred(code: int, message: String)
 signal room_expired(room_id: String)
 signal server_down()
+
 
 # ----------------------------- Configuration -----------------------------
 const HEARTBEAT_INTERVAL: float = 10.0
@@ -21,7 +24,7 @@ const HEALTH_CHECK_TIMEOUT: int = 5
 # ----------------------------- State ---------------------------------
 var server_url: String = ""
 var api_key: String = ""
-
+var is_private: bool = true
 var current_room_id: String = ""
 var is_host: bool = false
 var host_key: String = ""
@@ -52,6 +55,11 @@ func init(url: String, key: String) -> void:
 	_initialized = true
 	print("MatchLayAPI ready at ", server_url)
 
+func check_server_connection() -> void:
+	_check_health_and_run(func(): 
+		server_available.emit()
+	)
+
 func host_game(server_oid: String, public_data: Dictionary = {}, is_private: bool = true) -> void:
 	_pending_server_oid = server_oid
 	_check_health_and_run(_internal_host_game.bind(server_oid, public_data, is_private))
@@ -70,6 +78,9 @@ func add_player(player_oid: String) -> void:
 
 func remove_player(player_oid: String) -> void:
 	_check_health_and_run(_internal_remove_player.bind(player_oid))
+
+func set_room_visibility(priv: bool) -> void:
+	_check_health_and_run(_internal_set_room_visibility.bind(priv))
 
 func close_room() -> void:
 	_check_health_and_run(_internal_close_room)
@@ -132,6 +143,23 @@ func _internal_remove_player(player_oid: String) -> void:
 		"X-Host-Key: " + host_key
 	]
 	_send_request(server_url + "/room/%s/player" % current_room_id, headers, HTTPClient.METHOD_DELETE, JSON.stringify(body))
+
+func _internal_set_room_visibility(priv: bool) -> void:
+	if not is_host or host_key.is_empty() or current_room_id.is_empty():
+		error_occurred.emit(403, "Not hosting a room – cannot change visibility")
+		return
+	var body = {"is_private": priv}
+	var headers = [
+		"Content-Type: application/json",
+		"X-API-Key: " + api_key,
+		"X-Host-Key: " + host_key,
+	]
+	_send_request(
+		server_url + "/room/%s/visibility" % current_room_id,
+		headers,
+		HTTPClient.METHOD_POST,
+		JSON.stringify(body)
+	)
 
 func _internal_close_room() -> void:
 	if not is_host or host_key.is_empty():
@@ -239,6 +267,12 @@ func _on_request_completed(result: int, response_code: int, headers: PackedStrin
 			room_expired.emit(current_room_id)
 			leave_room()
 		return
+		
+	#Handle visibility changes
+	if json.has("action") and json.get("action") == "visibility":
+		is_private = json.get("is_private", true)
+		room_secret = json.get("secret") or ""
+		room_visibility_changed.emit(is_private, room_secret)
 	
 	# Handle successful responses
 	if json.has("rooms"):
@@ -260,10 +294,11 @@ func _on_request_completed(result: int, response_code: int, headers: PackedStrin
 		is_host = true
 		host_key = json.host_key
 		room_secret = secret_val if secret_val != null else ""
+		is_private = is_private_val
 		current_room_id = json.room_id
 		_start_heartbeat()
 		room_hosted.emit(json.room_id, room_secret, host_key, is_private_val)
-		call_deferred("_auto_add_host_player")
+
 	
 	elif json.has("room_id") and json.has("server_oid"):
 		# Join response (both secret and room_id endpoints)
@@ -281,16 +316,13 @@ func _on_request_completed(result: int, response_code: int, headers: PackedStrin
 		room_closed.emit()
 		leave_room()
 
-func _auto_add_host_player() -> void:
-	if is_host and not host_key.is_empty() and not _pending_server_oid.is_empty():
-		_internal_add_player(_pending_server_oid)
-		_pending_server_oid = ""
 
 # ----------------------------- State cleanup -----------------------------
 func _cleanup_state() -> void:
 	_stop_heartbeat()
 	current_room_id = ""
 	is_host = false
+	is_private = true
 	host_key = ""
 	room_secret = ""
 	_pending_server_oid = ""
